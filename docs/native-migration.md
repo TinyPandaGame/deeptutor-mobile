@@ -20,9 +20,9 @@ The optional `server/mobile_models` extension adds account-private API-key model
 
 ## Preview boundaries
 
-This is not desktop feature parity. See [the route and settings audit](feature-coverage.md) for the current gaps, including external partner channels/groups, some writing reviews, manual mastery-map editing, knowledge sync sources, skills/MCP/tool management and parts of model settings. Chat model selection and API-key management now have native interfaces; ordinary-user BYOK requires the optional server extension. EPUB uses extracted text/images. Calendar reminder fields are not device notifications. No public OTA manifest or installable binary is published for this source preview. Feature availability depends on the selected server's configured models and services.
+This is not desktop feature parity. See [the route and settings audit](feature-coverage.md) for the current gaps, including external partner channels/groups, some writing reviews, manual mastery-map editing, knowledge sync sources, skills/MCP/tool management and parts of model settings. Chat model selection and API-key management now have native interfaces; ordinary-user BYOK requires the optional server extension. EPUB uses extracted text/images. Calendar reminder fields are not device notifications. Existing public binaries and OTA manifests retain their own release versions; the 0.4.0 source update does not publish a new installer or OTA manifest. Feature availability depends on the selected server's configured models and services.
 
-The common API target remains DeepTutor 1.7.1. Tests of another installation do not establish this repository's runtime readiness. Current validation is recorded separately in `validation.md`.
+The source API target is DeepTutor 1.7.2; 1.7.1 remains covered by the scoped compatibility tests. See `upstream-1.7.2.md`. Tests of another installation do not establish this repository's runtime readiness. Current validation is recorded separately in `validation.md`.
 
 ## Migrated application workflows
 

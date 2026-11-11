@@ -39,9 +39,11 @@ export function resolveTurnModel(options: ModelOptions, value: ModelSelection | 
   // defaults to concrete IDs on every NEW turn so switching back really works.
   return { profile_id: chosen.profile_id, model_id: chosen.model_id };
 }
-export function discoveryModels(result: { status?: string; models?: { id: string }[] }) {
+export function discoveryModels(result: { status?: string; models?: { id: string; services?: string[] }[] }, service: Service = 'llm') {
   if (result.status !== 'connected') throw Error(({ auth_error: 'API Key 无效或没有访问权限。', timeout: '服务商连接超时，请重试。', unavailable: '服务商不支持自动获取模型，请手动填写模型 ID。', rate_limited: '请求过于频繁，请稍后重试。' } as Record<string, string>)[result.status || ''] || '连接检测未通过，请检查 API 地址和密钥。');
-  return (result.models || []).filter(m => typeof m.id === 'string' && m.id).map(m => m.id);
+  const kind = service === 'task' ? 'llm' : service;
+  return [...new Set((result.models || []).filter(m => typeof m.id === 'string' && m.id.trim()
+    && (!m.services?.length || m.services.includes(kind))).map(m => m.id.trim()))];
 }
 export function selectedModel(options: ModelOptions | null, value: ModelSelection | null) {
   return options?.options.find(m => selectionKey(m) === selectionKey(value || options.active));

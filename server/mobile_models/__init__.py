@@ -1,4 +1,4 @@
-"""Account-private API-key models for DeepTutor 1.7.1.
+"""Account-private API-key models for verified DeepTutor 1.7.1 and 1.7.2.
 
 Install with ``mobile_models.install(app)`` after creating the FastAPI app.
 No shared grants, accounts, workspaces, or upstream source files are rewritten.
@@ -166,7 +166,7 @@ def install(app):
     if getattr(app.state, "mobile_models_installed", False):
         return
     from deeptutor.__version__ import __version__ as upstream_version
-    if upstream_version != "1.7.1":
+    if upstream_version not in {"1.7.1", "1.7.2"}:
         raise RuntimeError("mobile_models must be revalidated for this DeepTutor version")
     from deeptutor.api.routers.auth import require_auth
     from deeptutor.multi_user.model_access import allowed_llm_options

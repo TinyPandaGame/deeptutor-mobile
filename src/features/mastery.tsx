@@ -18,6 +18,10 @@ import {
   useAction,
 } from "./common";
 import { Content, Data, array, object, string } from "./content";
+import { ModelPicker } from './model-picker';
+import { ReadAloud } from './read-aloud';
+import { masteryStart } from '../lib/mastery-start';
+import type { ModelSelection } from '../lib/models';
 type Topic = {
   path_id: string;
   name: string;
@@ -40,23 +44,16 @@ export function Mastery({ id = "" }: { id?: string }) {
     id ? `/api/mastery-paths/progress/${enc(id)}/board` : null,
   );
   const [editor, setEditor] = useState("");
+  const [pending, setPending] = useState<{ mode: string; text: string } | null>(null);
+  const [model, setModel] = useState<ModelSelection | null>(null);
   const action = useAction();
   const t = r.data;
   function start(mode: string) {
-    if (api)
-      ask(
-        api,
-        mode === "outline"
+    setPending({ mode, text: mode === "outline"
           ? "请先了解我的基础，和我一起规划这个学习目标。"
           : mode === "review"
             ? "请根据当前复习安排带我复习。"
-            : "请从当前最适合的知识点开始引导我学习。",
-        {
-          capability: "mastery_path",
-          mastery_path_id: id,
-          mastery_session_mode: mode,
-        },
-      );
+            : "请从当前最适合的知识点开始引导我学习。" });
   }
   return (
     <Page>
@@ -85,6 +82,7 @@ export function Mastery({ id = "" }: { id?: string }) {
       ) : t ? (
         <>
           <Prose text={t.metadata.goal} />
+          <ReadAloud text={t.metadata.goal} conversation={`mastery:${id}`} />
           <Actions>
             <Button title="继续学习" onPress={() => start("study")} />
             <Button
@@ -124,12 +122,7 @@ export function Mastery({ id = "" }: { id?: string }) {
                       title={string(k.name)}
                       detail={`掌握程度 ${Math.round(Number(k.mastery_level || 0) * 100)}%`}
                       onPress={() =>
-                        api &&
-                        ask(api, `请帮我学习：${string(k.name)}`, {
-                          capability: "mastery_path",
-                          mastery_path_id: id,
-                          mastery_session_mode: "study",
-                        })
+                        setPending({ mode: 'study', text: `请帮我学习：${string(k.name)}` })
                       }
                     />
                   );
@@ -175,6 +168,15 @@ export function Mastery({ id = "" }: { id?: string }) {
       {action.error ? (
         <Text style={{ color: C.danger }}>{action.error}</Text>
       ) : null}
+      {pending && <ModelPicker title="选择本次学习模型" sub="在讨论路线、学习或复习开始前选择；稍后仍可在对话中切换。"
+        value={model} onClose={() => setPending(null)} onChange={choice => {
+          const task = pending; setModel(choice);
+          void action.run(async () => {
+            if (!api) return;
+            const context = await masteryStart(api, id, task.mode, choice);
+            ask(api, task.text, context);
+          });
+        }} />}
       {editor ? (
         <Editor
           title={editor === "create" ? "新建学习目标" : "修改目标名称"}

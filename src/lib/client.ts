@@ -86,7 +86,7 @@ export class TutorClient {
       if (!r.ok) throw new ApiError(`无法检查服务认证设置（${r.status}）。`, r.status);
       const value = await r.json();
       if (typeof value.enabled !== "boolean" || typeof value.authenticated !== "boolean")
-        throw new ApiError("地址没有返回兼容的 DeepTutor 接口。请使用 1.7.1 的同源服务首页地址。");
+        throw new ApiError("地址没有返回兼容的 DeepTutor 接口。请使用 1.7.1 或 1.7.2 的同源服务首页地址。");
       return value;
     }, 15000);
   }
@@ -181,13 +181,16 @@ export class TutorClient {
     return this.request<T>(path, { method, body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
   }
   async download(path: string, init: RequestInit = {}, timeout = 60000, limit = 100 * 1024 * 1024) {
+    return (await this.downloadWithType(path, init, timeout, limit)).bytes;
+  }
+  async downloadWithType(path: string, init: RequestInit = {}, timeout = 60000, limit = 100 * 1024 * 1024) {
     await this.ensureSession();
     return this.consume(path, init, async r => {
       if (!r.ok) throw new ApiError(`未能读取文件（${r.status}）。`, r.status);
       if (Number(r.headers.get("content-length")) > limit) throw new ApiError("文件过大，请分段读取或导出。");
       const bytes = await r.arrayBuffer();
       if (bytes.byteLength > limit) throw new ApiError("文件过大，请分段读取或导出。");
-      return bytes;
+      return { bytes, contentType: r.headers.get("content-type") || "application/octet-stream" };
     }, timeout);
   }
   async text(path: string, timeout = 60000) {

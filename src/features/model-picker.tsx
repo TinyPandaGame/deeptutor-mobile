@@ -6,7 +6,7 @@ import { loadModelOptions, selectionKey, type ModelSelection, type ModelOptions 
 import { Button, Heading, Page, Row, s } from '../ui';
 import { FormModal } from './common';
 
-export function ModelPicker({ value, onChange, onClose }: { value: ModelSelection | null; onChange: (value: ModelSelection | null) => void; onClose: () => void }) {
+export function ModelPicker({ value, onChange, onClose, title = '切换模型', sub = '用于下一条新提问，当前回复不受影响' }: { value: ModelSelection | null; onChange: (value: ModelSelection | null) => void; onClose: () => void; title?: string; sub?: string }) {
   const { api } = useAuth();
   const [data, setData] = useState<ModelOptions | null>(null);
   const [error, setError] = useState('');
@@ -21,7 +21,7 @@ export function ModelPicker({ value, onChange, onClose }: { value: ModelSelectio
   }, [api, retry]);
   const choose = (v: ModelSelection | null) => { onChange(v); onClose(); };
   return <FormModal onClose={onClose}><Page>
-    <Heading title="切换模型" sub="用于下一条新提问，当前回复不受影响" right={<Button title="关闭" secondary onPress={onClose} />} />
+    <Heading title={title} sub={sub} right={<Button title="关闭" secondary onPress={onClose} />} />
     <Row title="跟随服务默认模型" detail={data?.options.find(m => selectionKey(m) === selectionKey(data.active))?.model || '使用服务器当前默认设置'}
       icon={!value ? 'checkmark-circle' : 'ellipse-outline'} onPress={() => choose(null)} />
     {loading ? <Text style={s.muted}>正在加载模型…</Text> : null}

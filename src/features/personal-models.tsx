@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { useResource } from '../lib/resources';
-import { discoveryModels, type ProviderChoice, type ModelOptions } from '../lib/models';
+import { type ProviderChoice, type ModelOptions } from '../lib/models';
+import { DiscoveryStatus, ModelChoices, useModelDiscovery } from './model-discovery';
 import { Button, C, Field, Heading, Page, Row, Section, s } from '../ui';
 import { Chips, FormModal, ResourceState, SmallAction, useAction } from './common';
 
@@ -19,20 +20,20 @@ function PersonalEditor({ profile, choices, onClose, onSaved }: { profile?: Pers
   const [format, setFormat] = useState(profile?.api_format || 'auto');
   const [key, setKey] = useState('');
   const [models, setModels] = useState(profile?.models.map(m => m.model) || []);
-  const [discovered, setDiscovered] = useState<string[]>([]);
   const [manual, setManual] = useState('');
-  const [status, setStatus] = useState('');
   const [allProviders, setAllProviders] = useState(false);
   const [providerSearch, setProviderSearch] = useState('');
   const action = useAction();
   const chooseProvider = (v: string) => {
     if (action.busy) return;
     const choice = choices.find(c => c.value === v); setBinding(v); setName(choice ? providerName(choice) : v);
-    setBase(choice?.base_url || ''); setFormat(choice?.default_api_format || 'auto'); setModels([]); setDiscovered([]); setStatus(''); setAllProviders(false);
+    setBase(choice?.base_url || ''); setFormat(choice?.default_api_format || 'auto'); setKey(''); setModels([]); setAllProviders(false);
   };
   const formats = choices.find(c => c.value === binding)?.api_formats || [];
   const payload = () => ({ ...(profile ? { id: profile.id } : {}), name: name.trim(), binding, base_url: base.trim(), api_format: format, ...(key.trim() ? { api_key: key.trim() } : {}) });
-  const toggle = (id: string) => setModels(rows => rows.includes(id) ? rows.filter(m => m !== id) : [...rows, id]);
+  const discovery = useModelDiscovery('/api/mobile/models/discover', payload(), 'llm',
+    !!base.trim() && (!!key.trim() || !!profile?.has_key && base.trim() === profile.base_url && binding === profile.binding) && !action.busy);
+  const resetPicks = () => setModels(profile && base.trim() === profile.base_url && binding === profile.binding ? profile.models.map(m => m.model) : []);
   return <FormModal onClose={onClose}><Page>
     <Heading title={profile ? '修改我的模型与密钥' : '添加我的 API Key'} right={<Button title="取消" secondary disabled={action.busy} onPress={onClose} />} />
     <View style={{ gap: 14 }}>
@@ -41,20 +42,14 @@ function PersonalEditor({ profile, choices, onClose, onSaved }: { profile?: Pers
       <Chips value={binding} items={choices.filter(v => ['deepseek', 'openai', 'anthropic', 'custom', 'gemini', binding].includes(v.value)).map(v => ({ value: v.value, label: providerName(v) }))} onChange={chooseProvider} />
       <SmallAction title="查看全部服务商" onPress={() => setAllProviders(true)} />
       <Field label="显示名称" value={name} onChangeText={setName} editable={!action.busy} />
-      <Field label="API 地址" value={base} onChangeText={v => { setBase(v); setDiscovered([]); setStatus(''); }} autoCapitalize="none" autoCorrect={false} editable={!action.busy} />
+      <Field label="API 地址" value={base} onChangeText={v => { setBase(v); setKey(''); setModels([]); }} autoCapitalize="none" autoCorrect={false} editable={!action.busy} />
       <Text style={s.label}>接口格式</Text>
-      <Chips value={format} onChange={v => { if (!action.busy) setFormat(v); }} items={[{ value: 'auto', label: '自动' }, { value: 'openai_chat', label: 'OpenAI 对话' }, { value: 'openai_responses', label: 'OpenAI Responses' }, { value: 'anthropic', label: 'Anthropic' }].filter(v => v.value === 'auto' || formats.includes(v.value))} />
-      <Field label={profile?.has_key ? '替换 API Key' : 'API Key'} value={key} onChangeText={setKey} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="off" editable={!action.busy} placeholder={profile?.has_key ? '留空保留已有密钥' : '输入服务商提供的密钥'} />
+      <Chips value={format} onChange={v => { if (!action.busy) { setFormat(v); resetPicks(); } }} items={[{ value: 'auto', label: '自动' }, { value: 'openai_chat', label: 'OpenAI 对话' }, { value: 'openai_responses', label: 'OpenAI Responses' }, { value: 'anthropic', label: 'Anthropic' }].filter(v => v.value === 'auto' || formats.includes(v.value))} />
+      <Field label={profile?.has_key ? '替换 API Key' : 'API Key'} value={key} onChangeText={v => { setKey(v); resetPicks(); }} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="off" editable={!action.busy} placeholder={profile?.has_key ? '留空保留已有密钥' : '输入服务商提供的密钥'} />
       {!!action.error && <Text accessibilityRole="alert" style={{ color: C.danger }}>{action.error}</Text>}
-      {!!status && <Text style={s.text}>{status}</Text>}
-      <Button title="获取模型列表" busy={action.busy} secondary onPress={() => void action.run(async () => {
-        if (!api) return;
-        setStatus(''); setDiscovered([]);
-        const rows = discoveryModels(await api.json('/api/mobile/models/discover', payload()));
-        setDiscovered(rows); setStatus(rows.length ? `已获取 ${rows.length} 个模型，请选择要使用的模型。` : '连接成功，但服务商没有返回模型；可以手动填写模型 ID。');
-      })} />
+      <DiscoveryStatus value={discovery} />
       <Section title={`选用模型（${models.length}）`} />
-      {[...new Set([...models, ...discovered])].map(id => <Row key={id} title={id} icon={models.includes(id) ? 'checkbox' : 'square-outline'} onPress={() => { if (!action.busy) toggle(id); }} />)}
+      <ModelChoices models={discovery.models} selected={models} onChange={setModels} disabled={action.busy} />
       <Field label="手动添加模型 ID" value={manual} onChangeText={setManual} autoCapitalize="none" autoCorrect={false} editable={!action.busy} placeholder="自动获取不可用时，可填服务商给出的模型 ID" />
       <SmallAction title="添加这个模型" onPress={() => { const id = manual.trim(); if (!action.busy && id) { setModels(v => [...new Set([...v, id])]); setManual(''); } }} />
       <Button title="保存模型与密钥" busy={action.busy} onPress={() => void action.run(async () => {

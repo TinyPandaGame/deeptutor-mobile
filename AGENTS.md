@@ -6,7 +6,9 @@ Keep user-selected computer/server origins, anonymous/account modes, and service
 
 ## Release numbering
 
-Follow `docs/versioning.md`: numeric `vX.Y.Z` only. Client fixes on the same tested upstream version increment Z; adapting a new official release increments Y and resets Z. Keep native runtime unchanged for JS-only updates. Do not publish before the target-client checks pass.
+Follow `docs/versioning.md`: numeric `vX.Y.Z` only. Client fixes on the same tested upstream version increment Z; adapting a new official release increments Y and resets Z. Keep native runtime unchanged for JS-only updates.
+
+As requested on 2026-11-11, use functional and API contract tests as the gate for GitHub source updates. Do not start local Android/iOS devices or simulators, or upload TestFlight, unless requested again. Run lint, application/test typechecks, relevant tests against the pinned upstream packages, and source/history privacy checks before publishing. Report untested UI, native playback, real provider inference and deployment separately; do not fabricate device acceptance evidence or signed OTA manifests from source-test results.
 
 ## Expo has changed — do not trust your training data
 

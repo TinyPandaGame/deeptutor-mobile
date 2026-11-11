@@ -2,9 +2,11 @@
 
 **在手机上使用你自己的 DeepTutor。**
 
-DeepTutor 的非官方 Android / iOS 客户端，支持拍照提问、资料阅读和错题整理。界面为简体中文，需连接自己部署的 DeepTutor 1.7.1 服务。
+DeepTutor 的非官方 Android / iOS 客户端，支持拍照提问、资料阅读和错题整理。界面为简体中文，当前 0.4.0 源码适配 DeepTutor 1.7.2，并对 1.7.1 保留接口回归；需连接自己部署的服务。
 
 ## 下载与安装
+
+本次 0.4.0 更新源码与功能测试，新增选段朗读、批量模型配置和学习前选模型，详见 [1.7.2 适配说明](docs/upstream-1.7.2.md)。以下安装包尚不包含本次新增功能，没有下发 0.4.0 OTA。
 
 Android：[0.3.3](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.3.3)，优化学习选项、按钮和键盘布局。iOS 工程仍为 [0.3.2](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.3.2)。
 
@@ -43,7 +45,7 @@ iOS 环境准备和构建步骤见[构建指南](docs/build.md)。
 
 ## 当前状态
 
-Android 0.3.3 已通过模拟器覆盖安装和主要交互验证。本轮未构建或验收 iOS，iOS 真机仍未验收。详细范围、热更新条件及已知问题见[验证记录](docs/validation.md)、[更新说明](docs/updates.md)和[安全审计](docs/security-review.md)。
+0.4.0 按功能与接口测试门槛发布源码，本轮没有启动 Android/iOS 设备、构建安装包或上传 TestFlight。旧 Android 0.3.3 的模拟器验证结果只属于该版本。详细范围、热更新条件及已知问题见[验证记录](docs/validation.md)、[更新说明](docs/updates.md)和[安全审计](docs/security-review.md)。
 
 ## 开发与开源
 

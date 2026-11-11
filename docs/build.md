@@ -143,7 +143,7 @@ npm run export:source -- --output-dir <交付目录>
 
 iOS 分享扩展的 App Group 根据 bundle identifier 生成。真机发行需配置自己的 App Group、证书和 provisioning；模拟器构建通过不能替代真机验证。
 
-本版源码版本为 `0.3.3`，原生基础版本仍为 0.3.2（Android versionCode / iOS buildNumber 6）。本轮只构建和验收 Android，公开 iOS 工程保持 0.3.2；工程的提供不代表已发行 IPA 或上传 TestFlight。
+本版源码版本为 `0.4.0`，原生基础版本仍为 0.3.2（Android versionCode / iOS buildNumber 6）。本轮按功能与接口测试更新源码，不启动双端设备，不构建新安装包或上传 TestFlight。已公开 Android APK 保持 0.3.3，iOS 工程保持 0.3.2。
 
 ### 独立模拟器验收
 

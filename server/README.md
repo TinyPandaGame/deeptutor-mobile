@@ -1,6 +1,6 @@
 # 个人模型接口（可选服务端扩展）
 
-目标版本为 **DeepTutor 1.7.1**。普通账号无需提升为管理员，即可填写自己的 API Key、发现模型、保存配置及选择对话模型。未安装扩展时，客户端仍能切换官方 `/api/settings/llm-options` 返回的模型，并明确提示个人配置接口未安装。
+验证目标为 **DeepTutor 1.7.1 / 1.7.2**；未知版本仍拒绝加载。普通账号无需提升为管理员，即可填写自己的 API Key、发现模型、保存配置及选择对话模型。未安装扩展时，客户端仍能切换官方 `/api/settings/llm-options` 返回的模型，并明确提示个人配置接口未安装。
 
 ## 安装边界
 
@@ -44,10 +44,11 @@ Docker 应使用只读代码挂载或自建镜像，保留既有数据卷和启�
 
 ## 验证
 
-在安装了目标版本依赖的环境执行：
+在隔离环境安装 `deeptutor[server,providers,reading]==1.7.2`（或 1.7.1），以及 `httpx`、`python-multipart`。测试还需要 Node 24 执行客户端实际的配置生成函数。随后执行：
 
 ```bash
 python server/tests/test_mobile_models.py
+python server/tests/test_upstream_contracts.py
 ```
 
 测试创建隔离临时 home，使用 HTTP TestClient，不启动本地 DeepTutor 学习后端，也不读真实学习资料或密钥。覆盖双账号权限隔离、脱敏、留空/替换、下一次运行时配置解析、模型发现、默认选择/删除和无登录拒绝。

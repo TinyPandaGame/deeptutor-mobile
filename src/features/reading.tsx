@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ReadAloud } from './read-aloud';
 import { Alert, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "../lib/auth";
@@ -433,6 +434,7 @@ function Collection({ id }: { id: string }) {
             <View style={[s.card, { gap: 12 }]}>
               <Section title="整理后的阅读笔记" />
               <Prose text={organized} />
+              <ReadAloud text={organized} conversation={`reading:${id}`} />
               <Button title="保存到笔记本" onPress={() => setCapture(true)} />
               <SmallAction title="收起" onPress={() => setOrganized("")} />
             </View>
@@ -634,6 +636,7 @@ function Reader({ id, workspace }: { id: string; workspace: string }) {
                 <View style={s.card}>
                   <ResourceState resource={unit} />
                   <Prose text={unit.data?.text} />
+                  <ReadAloud text={unit.data?.text || ''} conversation={`reading:${workspace}:${id}`} />
                   {media.data
                     ?.filter((image) => image.locator === page)
                     .map((image) => (
@@ -689,6 +692,7 @@ function Reader({ id, workspace }: { id: string; workspace: string }) {
                   />
                   <Prose text={n.quote} />
                   <Prose text={n.note} />
+                  <ReadAloud text={[n.quote, n.note].filter(Boolean).join('\n')} conversation={`reading:${workspace}:${id}`} />
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                     <SmallAction
                       title="讲解这段"

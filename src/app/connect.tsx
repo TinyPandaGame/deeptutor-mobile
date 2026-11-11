@@ -29,7 +29,7 @@ export default function Connect() {
       <Text style={s.muted}>可直接粘贴完整地址。电脑地址可省略 http://，公网域名默认使用 https://。不要填写 localhost 或 127.0.0.1。</Text>
       {error || auth.bootError ? <Text accessibilityRole="alert" style={{ color: C.danger }}>{error || auth.bootError}</Text> : null}
       <Button title={busy ? "正在检测学习服务…" : "下一步"} busy={busy} disabled={!url.trim()} onPress={() => void connect()} />
-      <Text style={s.muted}>首次支持 DeepTutor 1.7.1。自动识别是否需要账号；下次打开自动恢复连接和登录。HTTP 局域网连接不加密，请只在可信网络使用。</Text>
+      <Text style={s.muted}>支持 DeepTutor 1.7.1 / 1.7.2。自动识别是否需要账号；下次打开自动恢复连接和登录。HTTP 局域网连接不加密，请只在可信网络使用。</Text>
     </View>
     {!!auth.profiles.length && <Section title="已保存的服务" />}
     {auth.profiles.map(p => <View key={p.origin}>

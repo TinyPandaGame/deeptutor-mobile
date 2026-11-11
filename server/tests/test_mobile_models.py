@@ -44,6 +44,14 @@ client = TestClient(app)
 
 
 class PersonalModelsTest(unittest.TestCase):
+    def test_unknown_upstream_version_is_rejected_without_installing_routes(self):
+        target = FastAPI()
+        original = len(target.routes)
+        with patch('deeptutor.__version__.__version__', '1.7.99'):
+            with self.assertRaises(RuntimeError):
+                mm.install(target)
+        self.assertEqual(len(target.routes), original)
+
     def setUp(self):
         for name in ("alice", "bob"):
             with user_context(actor(name)):

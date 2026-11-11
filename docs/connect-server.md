@@ -2,9 +2,9 @@
 
 先按[安装说明](build.md)准备客户端，并取得自己部署的 DeepTutor 服务首页地址。客户端通过网络使用这台服务器，不在手机上启动后端或下载模型。
 
-当前适配自己管理的 DeepTutor 1.7.1 部署。保持网页、`/api/*`、`/ws` 同一 HTTPS 源；填写 `tutor.example.com` 或 `https://tutor.example.com`，公网域名自动补 `https://`。不要填写 `/api` 或登录页。当前不支持 URL 子路径、独立跨源 API、OAuth-only / 网关交互登录或设备配对替代用户名密码。
+当前源码适配自己管理的 DeepTutor 1.7.2 部署，并保留 1.7.1 接口兼容。安装包的适配版本以各自 Release 为准。保持网页、`/api/*`、`/ws` 同一 HTTPS 源；填写 `tutor.example.com` 或 `https://tutor.example.com`，公网域名自动补 `https://`。不要填写 `/api` 或登录页。当前不支持 URL 子路径、独立跨源 API、OAuth-only / 网关交互登录或设备配对替代用户名密码。
 
-先按 [上游 1.7.1](https://github.com/HKUDS/DeepTutor/tree/v1.7.1) 配置服务，再启用 DeepTutor 本身的账号认证、创建账号并配置安全 Cookie。客户端读取 `/api/auth/status` 的 `enabled`，不会替你开启服务端认证。管理员若限制了 private_login_hosts，应提供允许登录的私有入口，不能靠客户端绕过。公网入口必须有可信 HTTPS 证书；客户端不提供忽略证书验证按钮。
+先按 [上游 1.7.2](https://github.com/HKUDS/DeepTutor/tree/v1.7.2) 配置服务，再启用 DeepTutor 本身的账号认证、创建账号并配置安全 Cookie。客户端读取 `/api/auth/status` 的 `enabled`，不会替你开启服务端认证。管理员若限制了 private_login_hosts，应提供允许登录的私有入口，不能靠客户端绕过。公网入口必须有可信 HTTPS 证书；客户端不提供忽略证书验证按钮。
 
 下面是同源反向代理的结构示例。端口、证书与认证设置都应按自己的部署配置。它不会安装服务，也不能代替服务端认证：
 

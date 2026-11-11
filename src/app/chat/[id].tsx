@@ -47,6 +47,7 @@ import {
   cancelledTurn,
 } from "../../lib/conversation";
 import { Chips, Editor, Prose, SmallAction, ask } from "../../features/common";
+import { ReadAloud } from '../../features/read-aloud';
 import { GeneratedFile } from "../../features/generated-file";
 import { ChatThreads, ThreadSourceEditor } from "../../features/chat-threads";
 import { tutorSource, threadSource, visibleBranch, type SourceContext } from "../../lib/chat-actions";
@@ -834,6 +835,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
                         <Text style={s.label}>我的回答</Text>
                       ) : null}
                       <Prose text={part.text} streaming={busy && i === messages.length - 1} />
+                      <ReadAloud text={part.text} conversation={sessionId || 'new'} disabled={busy} />
                     </View>
                   ))
                 )}
