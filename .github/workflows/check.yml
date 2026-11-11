@@ -28,7 +28,6 @@ jobs:
         upstream: ['1.7.1', '1.7.2']
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      TEST_SCRATCH: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,5 +37,9 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install "deeptutor[server,providers,reading]==${{ matrix.upstream }}" httpx python-multipart
-      - run: python server/tests/test_mobile_models.py
-      - run: python server/tests/test_upstream_contracts.py
+      - name: Check upstream contracts
+        env:
+          TEST_SCRATCH: ${{ runner.temp }}
+        run: |
+          python server/tests/test_mobile_models.py
+          python server/tests/test_upstream_contracts.py
