@@ -1,11 +1,12 @@
-import { checkReleases, compareVersions, parseVersion, RELEASES_URL } from "./updates.ts";
+import { checkReleases, compareVersions, parseVersion, RELEASES_URL, type AppRelease } from "./updates.ts";
 
 export type SignedUpdate = { manifest: string; signature: string; version: string };
-export async function githubUpdate(platform: string, runtime: string, current: string, fetcher: typeof fetch = fetch): Promise<SignedUpdate | null> {
+export async function githubUpdate(platform: string, runtime: string, current: string, fetcher: typeof fetch = fetch,
+  releases?: AppRelease[]): Promise<SignedUpdate | null> {
   if (!["android", "ios"].includes(platform) || !/^[\w.-]{1,128}$/.test(runtime) || !parseVersion(current))
     throw Error("无法确认当前安装包版本。");
   const preview = !!parseVersion(current)?.pre.length;
-  const rows = (await checkReleases(undefined, fetcher))
+  const rows = (releases ?? await checkReleases(undefined, fetcher))
     .filter(row => (preview || !row.preview) && (compareVersions(row.tag, current) || 0) > 0)
     .sort((a, b) => compareVersions(b.tag, a.tag) || 0);
   for (const row of rows) {

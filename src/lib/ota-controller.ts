@@ -1,44 +1,71 @@
+import type { UpdateOffer } from "./update-offer.ts";
+
 export type OtaState = {
-  status: "disabled" | "idle" | "checking" | "downloading" | "ready" | "current" | "error";
-  version?: string; message?: string;
+  status: "idle" | "checking" | "available" | "downloading" | "ready" | "current" | "error";
+  offer?: UpdateOffer; checkedAt?: number; message?: string;
 };
 export type OtaDriver = {
-  enabled: boolean;
-  check(): Promise<{ available: boolean; version?: string }>;
-  download(): Promise<{ ready: boolean; version?: string }>;
+  check(): Promise<UpdateOffer | null>;
+  download(offer: UpdateOffer): Promise<{ ready: boolean }>;
   reload(): Promise<void>;
 };
 
 // No learning account or service client participates in application updates.
 export class OtaController {
-  snapshot: OtaState;
+  snapshot: OtaState = { status: "idle" };
   private listeners = new Set<() => void>();
   private pending: Promise<void> | null = null;
-  private lastCheck = 0;
+  private lastCheck = -Infinity;
+  private prompted = new Set<string>();
   private driver: OtaDriver;
-  constructor(driver: OtaDriver) { this.driver = driver; this.snapshot = { status: driver.enabled ? "idle" : "disabled" }; }
+  constructor(driver: OtaDriver) { this.driver = driver; }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.snapshot;
   private set(value: OtaState) { this.snapshot = value; this.listeners.forEach(fn => fn()); }
-  check = (manual = false): Promise<void> => {
-    if (!this.driver.enabled || this.snapshot.status === "ready") return Promise.resolve();
+  check = (fresh = false): Promise<void> => {
     if (this.pending) return this.pending;
-    if (!manual && Date.now() - this.lastCheck < 60000) return Promise.resolve();
+    if (this.snapshot.status === "ready") return Promise.resolve();
+    if (!fresh && Date.now() - this.lastCheck < 60000) return Promise.resolve();
     this.lastCheck = Date.now();
     this.pending = this.run().finally(() => { this.pending = null; });
     return this.pending;
   };
   private async run() {
-    this.set({ status: "checking" });
+    this.set({ ...this.snapshot, status: "checking", message: undefined });
     try {
-      const result = await this.driver.check();
-      if (!result.available) { this.set({ status: "current" }); return; }
-      this.set({ status: "downloading", version: result.version });
-      const download = await this.driver.download();
+      const offer = await this.driver.check();
+      this.set({ status: offer ? "available" : "current", offer: offer || undefined, checkedAt: Date.now() });
+    } catch (error) {
+      this.set({ ...this.snapshot, status: "error", message: error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
+        ? error.message : "暂时无法检查更新，请联网后重试。" });
+    }
+  }
+  // Claim once per version/install method in this app run. Dismissal does not
+  // discard the offer: the page can still show it and start an explicit download.
+  claimPrompt = (): UpdateOffer | null => {
+    const { status, offer } = this.snapshot;
+    if (status !== "available" || !offer) return null;
+    const key = `${offer.release.tag}:${offer.kind}`;
+    if (this.prompted.has(key)) return null;
+    this.prompted.add(key);
+    return offer;
+  };
+  download = (tag: string): Promise<void> => {
+    if (this.pending) return this.snapshot.status === "checking"
+      ? this.pending.then(() => this.download(tag)) : this.pending;
+    const { offer, status } = this.snapshot;
+    if (!offer || offer.kind !== "ota" || offer.release.tag !== tag || status === "ready") return Promise.resolve();
+    this.pending = this.fetch(offer).finally(() => { this.pending = null; });
+    return this.pending;
+  };
+  private async fetch(offer: UpdateOffer) {
+    this.set({ ...this.snapshot, status: "downloading", message: undefined });
+    try {
+      const download = await this.driver.download(offer);
       if (!download.ready) throw Error("Update not downloaded");
-      this.set({ status: "ready", version: download.version || result.version });
+      this.set({ ...this.snapshot, status: "ready" });
     } catch {
-      this.set({ status: "error", message: "暂时无法完成更新，继续使用当前版本。联网后可重试。" });
+      this.set({ ...this.snapshot, status: "error", message: "下载未完成，请重试。你可以继续使用当前版本。" });
     }
   }
   restart = async () => {

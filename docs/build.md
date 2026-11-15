@@ -2,7 +2,7 @@
 
 ## 使用发行附件
 
-Android 使用 [0.4.1 APK](https://github.com/TinyPandaGame/deeptutor-mobile/releases/download/v0.4.1/deeptutor-mobile-0.4.1-arm64-v8a.apk)，iOS 工程保持 [0.3.2 ZIP](https://github.com/TinyPandaGame/deeptutor-mobile/releases/download/v0.3.2/deeptutor-mobile-0.3.2-ios-project.zip)。附件校验值、签名和实际测试范围分别见 [Android 0.4.1 Release](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.4.1) 和 [iOS 0.3.2 Release](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.3.2)。
+Android 使用 [0.4.2 APK](https://github.com/TinyPandaGame/deeptutor-mobile/releases/download/v0.4.2/deeptutor-mobile-0.4.2-arm64-v8a.apk)，iOS 工程保持 [0.3.2 ZIP](https://github.com/TinyPandaGame/deeptutor-mobile/releases/download/v0.3.2/deeptutor-mobile-0.3.2-ios-project.zip)。附件校验值、签名和实际测试范围分别见 [Android 0.4.2 Release](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.4.2) 和 [iOS 0.3.2 Release](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.3.2)。
 
 ### Android APK
 
@@ -143,7 +143,7 @@ npm run export:source -- --output-dir <交付目录>
 
 iOS 分享扩展的 App Group 根据 bundle identifier 生成。真机发行需配置自己的 App Group、证书和 provisioning；模拟器构建通过不能替代真机验证。
 
-本版源码与 Android 原生版本为 `0.4.1`，Android versionCode 7，包含新增的 Expo Clipboard 模块。旧运行时不能加载本版 JS，须下载完整 APK。本轮未启动设备或模拟器；公开 iOS 工程仍为 0.3.2，未构建新 iOS 包、上传 TestFlight 或下发 OTA。
+当前源码与 Android APK 内置客户端版本为 `0.4.2`，原生基础版本保持 `0.4.1`、Android versionCode 7，实际运行时与 0.4.1 一致。本次提供完整 APK，不下发 OTA；旧版请在“我的 → 应用更新”下载安装。构建与包检查通过，本轮未启动设备或模拟器。公开 iOS 工程仍为 0.3.2，未构建新 iOS 包或上传 TestFlight。
 
 ### 独立模拟器验收
 

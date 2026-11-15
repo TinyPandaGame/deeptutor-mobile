@@ -2,15 +2,15 @@
 
 **在手机上使用你自己的 DeepTutor。**
 
-DeepTutor 的非官方 Android / iOS 客户端，支持拍照提问、资料阅读和错题整理。界面为简体中文，当前 0.4.1 适配 DeepTutor 1.7.2，并对 1.7.1 保留接口回归；需连接自己部署的服务。
+DeepTutor 的非官方 Android / iOS 客户端，支持拍照提问、资料阅读和错题整理。界面为简体中文，当前 0.4.2 适配 DeepTutor 1.7.2，并对 1.7.1 保留接口回归；需连接自己部署的服务。
 
 ## 下载与安装
 
-Android [0.4.1](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.4.1) 新增图文复制和删除对话，也包含 0.4.0 的朗读与模型配置更新。需要下载完整 APK 升级，不能通过旧版热更新安装。详见[发行说明](docs/releases/0.4.1.md)。
+Android [0.4.2](https://github.com/TinyPandaGame/deeptutor-mobile/releases/tag/v0.4.2) 修复更新提醒：发现新版先提示，确认后再下载，跳过后仍保留下载入口。旧版请先在“我的 → 应用更新”下载完整 APK，新流程在安装后生效。本次不提供热更新，详见[发行说明](docs/releases/0.4.2.md)。
 
 | 平台 | 下载 | 安装方式 |
 | --- | --- | --- |
-| Android | [0.4.1 APK（arm64）](https://github.com/TinyPandaGame/deeptutor-mobile/releases/download/v0.4.1/deeptutor-mobile-0.4.1-arm64-v8a.apk) | 下载完整包安装，沿用原发行签名 |
+| Android | [0.4.2 APK（arm64）](https://github.com/TinyPandaGame/deeptutor-mobile/releases/download/v0.4.2/deeptutor-mobile-0.4.2-arm64-v8a.apk) | 下载完整包安装，沿用原发行签名 |
 | iOS | [Xcode 工程 ZIP](https://github.com/TinyPandaGame/deeptutor-mobile/releases/download/v0.3.2/deeptutor-mobile-0.3.2-ios-project.zip) | 在 Mac 上自行构建和签名，暂无可直接安装的 IPA |
 
 iOS 环境准备和构建步骤见[构建指南](docs/build.md)。
@@ -43,7 +43,7 @@ iOS 环境准备和构建步骤见[构建指南](docs/build.md)。
 
 ## 当前状态
 
-0.4.1 提供源码和独立 Android APK，完成自动测试、构建与包检查；本轮未做设备安装、复制粘贴或系统分享实测。iOS 工程保持 0.3.2，未新增 TestFlight 或 OTA。详细范围及已知问题见[验证记录](docs/validation.md)、[更新说明](docs/updates.md)和[安全审计](docs/security-review.md)。
+0.4.2 提供源码和独立 Android APK，完成自动测试、构建与包检查；本轮未做设备弹窗、浏览器安装或原生更新重启实测。iOS 工程保持 0.3.2，未新增 TestFlight 或 OTA。详细范围及已知问题见[验证记录](docs/validation.md)、[更新说明](docs/updates.md)和[安全审计](docs/security-review.md)。
 
 ## 开发与开源
 
