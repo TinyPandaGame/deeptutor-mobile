@@ -3320,6 +3320,13 @@
       "resolved": "https://registry.npmjs.org/expo-build-properties/-/expo-build-properties-57.0.23.tgz"
     },
     {
+      "package": "expo-clipboard",
+      "version": "57.0.2",
+      "license": "MIT",
+      "developmentOnly": false,
+      "resolved": "https://registry.npmjs.org/expo-clipboard/-/expo-clipboard-57.0.2.tgz"
+    },
+    {
       "package": "expo-constants",
       "version": "57.0.22",
       "license": "MIT",

@@ -10,6 +10,10 @@ Follow `docs/versioning.md`: numeric `vX.Y.Z` only. Client fixes on the same tes
 
 As requested on 2026-11-11, use functional and API contract tests as the gate for GitHub source updates. Do not start local Android/iOS devices or simulators, or upload TestFlight, unless requested again. Run lint, application/test typechecks, relevant tests against the pinned upstream packages, and source/history privacy checks before publishing. Report untested UI, native playback, real provider inference and deployment separately; do not fabricate device acceptance evidence or signed OTA manifests from source-test results.
 
+## GitHub publishing confirmation
+
+As requested on 2026-11-15, after completing changes and validation, report the version, changes and validation limits, then ask the user whether to upload this batch to GitHub. Wait for explicit confirmation before pushing commits/tags, publishing Releases or uploading installers/OTA assets. Previous releases and standing requests to notify the publishing thread are not approval for a new batch. Before confirmation, any handoff to the publishing thread is informational only and must explicitly keep publishing paused. Finish authorized implementation and checks before asking; do not request approval again for the same batch once the user has confirmed it.
+
 ## Expo has changed — do not trust your training data
 
 Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:

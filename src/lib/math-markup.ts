@@ -6,7 +6,7 @@ export function normalizeMathDelimiters(text: string) {
     /\\[a-zA-Z]+|[=+×÷]|\d\s*[-*/^]\s*\d/.test(body) ? `$${body}$` : all,
   );
 }
-function mathParts(text: string) {
+export function mathParts(text: string) {
   const pattern = /(?<!\\)\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|(?<!\\)\$[^\n$]+?\$|\\\([^\n]+?\\\)/g;
   const value = normalizeMathDelimiters(text);
   const parts: { text: string; formula?: string; display?: boolean; incomplete?: boolean }[] = [];

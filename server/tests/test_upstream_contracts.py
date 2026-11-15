@@ -1,10 +1,14 @@
 """Real upstream routers and registry merge; synthetic data, no paid providers/server."""
+import asyncio
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
+from uuid import uuid4
 from unittest.mock import AsyncMock, patch
 
 temporary = tempfile.TemporaryDirectory(prefix="upstream-contract-", dir=os.environ.get("TEST_SCRATCH"))
@@ -13,6 +17,12 @@ os.environ["DEEPTUTOR_HOME"] = temporary.name
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from deeptutor.api.routers import voice
+from deeptutor.api.routers import sessions
+from deeptutor.multi_user.models import CurrentUser, UserScope
+from deeptutor.multi_user.paths import user_context
+from deeptutor.services.session import get_sqlite_session_store
+from deeptutor.services.workspace import get_content_workspace_service
+from deeptutor.services.workspace.context import workspace_context
 from deeptutor.api.routers.settings import RegistryEditPayload
 from deeptutor.services.settings.registry_edit import merge_registry_edit
 
@@ -26,6 +36,88 @@ app = FastAPI()
 app.include_router(voice.router, prefix="/api/voice", dependencies=[Depends(require_test_identity)])
 client = TestClient(app)
 headers = {"Authorization": "Bearer fixture-token"}
+
+
+session_workspaces = {}
+
+
+@contextmanager
+def session_identity(name="alice", workspace="math"):
+    root = Path(temporary.name) / "data" / "users" / name
+    actor = CurrentUser(id=name, username=name, role="user", scope=UserScope(kind="user", user_id=name, root=root))
+    with user_context(actor):
+        key = (name, workspace)
+        if key not in session_workspaces:
+            session_workspaces[key] = get_content_workspace_service().create_workspace(workspace)["workspace_id"]
+        with workspace_context(session_workspaces[key]):
+            yield get_sqlite_session_store()
+
+
+async def session_authentication(request: Request):
+    name = request.headers.get("x-test-user")
+    if name not in {"alice", "bob"}:
+        raise HTTPException(401)
+    with session_identity(name, request.headers.get("x-deeptutor-workspace", "math")):
+        yield
+
+
+app.include_router(sessions.router, prefix="/api/sessions", dependencies=[Depends(session_authentication)])
+
+
+class SessionDeleteContractsTest(unittest.TestCase):
+    def setUp(self):
+        self.parent, self.child, self.grandchild, self.keep = [str(uuid4()) for _ in range(4)]
+        async def seed(store):
+            for id in [self.parent, self.child, self.grandchild, self.keep]:
+                await store.create_session(title="Synthetic conversation", session_id=id)
+                await store.add_message(id, "user", "Synthetic content")
+            await store.update_session_preferences(self.child, {"parent_session_id": self.parent})
+            await store.update_session_preferences(self.grandchild, {"parent_session_id": self.child})
+        with session_identity() as store:
+            self.store = store
+            asyncio.run(seed(store))
+        self.headers = {"x-test-user": "alice", "X-DeepTutor-Workspace": "math"}
+
+    def exists(self, id):
+        with session_identity() as store:
+            return asyncio.run(store.get_session(id)) is not None
+
+    def test_delete_acknowledgement_and_descendant_cleanup_preserve_unrelated_conversations(self):
+        turns = SimpleNamespace(cancel_turn_and_wait=AsyncMock(return_value=True))
+        active = AsyncMock(side_effect=lambda id: [{"id": "synthetic-turn"}] if id == self.parent else [])
+        with patch.object(sessions, "_turn_application_service", return_value=turns), patch.object(self.store, "list_active_turns", active), patch.object(sessions, "_cleanup_deleted_session", new=AsyncMock()) as cleanup:
+            response = client.delete(f"/api/sessions/{self.parent}", headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), {"deleted": True, "session_id": self.parent})
+            turns.cancel_turn_and_wait.assert_awaited_once_with("synthetic-turn")
+            self.assertEqual([call.args[0] for call in cleanup.await_args_list], [self.grandchild, self.child, self.parent])
+        for id in [self.parent, self.child, self.grandchild]:
+            self.assertFalse(self.exists(id))
+        self.assertTrue(self.exists(self.keep))
+
+    def test_other_account_or_workspace_cannot_delete_this_conversation(self):
+        for headers in [{"x-test-user": "bob", "X-DeepTutor-Workspace": "math"}, {"x-test-user": "alice", "X-DeepTutor-Workspace": "chinese"}, {}]:
+            result = client.delete(f"/api/sessions/{self.parent}", headers=headers)
+            self.assertEqual(result.status_code, 404 if headers else 401)
+        self.assertTrue(self.exists(self.parent))
+        self.assertTrue(self.exists(self.child))
+
+    def test_unstoppable_turn_returns_conflict_without_deleting_messages(self):
+        turns = SimpleNamespace(cancel_turn_and_wait=AsyncMock(return_value=False))
+        with patch.object(sessions, "_turn_application_service", return_value=turns), patch.object(self.store, "list_active_turns", new=AsyncMock(return_value=[{"id": "busy-turn"}])), patch.object(sessions, "_cleanup_deleted_session", new=AsyncMock()) as cleanup:
+            result = client.delete(f"/api/sessions/{self.parent}", headers=self.headers)
+            self.assertEqual(result.status_code, 409, result.text)
+            cleanup.assert_not_awaited()
+        for id in [self.parent, self.child, self.grandchild, self.keep]:
+            self.assertTrue(self.exists(id))
+
+    def test_missing_conversation_and_storage_failure_never_acknowledge_deletion(self):
+        self.assertEqual(client.delete("/api/sessions/fixture-does-not-exist", headers=self.headers).status_code, 404)
+        with patch.object(sessions, "_turn_application_service", return_value=SimpleNamespace()), patch.object(self.store, "delete_session", new=AsyncMock(return_value=False)), patch.object(sessions, "_cleanup_deleted_session", new=AsyncMock()) as cleanup:
+            result = client.delete(f"/api/sessions/{self.parent}", headers=self.headers)
+            self.assertEqual(result.status_code, 409, result.text)
+            cleanup.assert_not_awaited()
+        self.assertTrue(self.exists(self.parent))
 
 
 class UpstreamContractsTest(unittest.TestCase):

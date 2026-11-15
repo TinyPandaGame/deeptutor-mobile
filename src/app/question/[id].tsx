@@ -1,6 +1,7 @@
 import { PrivateImage } from "../../components/PrivateImage";
+import { QuestionImage } from "../../components/QuestionImage";
 import { useState } from "react";
-import { Alert, Image, Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../lib/auth";
 import { Question } from "../../lib/client";
@@ -82,13 +83,9 @@ function NewQuestion() {
               image.url ? (
                 <PrivateImage key={i} path={image.url} />
               ) : image.base64 ? (
-                <Image
+                <QuestionImage
                   key={i}
-                  source={{
-                    uri: `data:${image.mime_type || "image/jpeg"};base64,${image.base64}`,
-                  }}
-                  style={{ width: "100%", height: 240 }}
-                  resizeMode="contain"
+                  uri={`data:${image.mime_type || "image/jpeg"};base64,${image.base64}`}
                 />
               ) : null,
             )}

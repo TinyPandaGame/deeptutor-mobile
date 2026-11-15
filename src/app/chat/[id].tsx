@@ -46,7 +46,8 @@ import {
   visibleMessage,
   cancelledTurn,
 } from "../../lib/conversation";
-import { Chips, Editor, Prose, SmallAction, ask } from "../../features/common";
+import { Chips, Editor, FormModal, Prose, SmallAction, ask } from "../../features/common";
+import { useConversationDelete } from "../../features/conversation-delete";
 import { ReadAloud } from '../../features/read-aloud';
 import { GeneratedFile } from "../../features/generated-file";
 import { ChatThreads, ThreadSourceEditor } from "../../features/chat-threads";
@@ -98,6 +99,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
   const { api } = useAuth();
   const keyboardVisible = useKeyboardState(state => state.isVisible);
   const [threadsOpen, setThreadsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [branches, setBranches] = useState<Record<string, number>>({});
@@ -172,8 +174,13 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
     }
   });
   const source = context.selection_tutor_context as SourceContext | undefined;
+  const deletion = useConversationDelete(async () => {
+    alive.current = false;
+    socket.current?.close(); socket.current = null;
+    try { await draft.discard(); } finally { router.replace('/history'); }
+  });
   async function choosePhoto(camera: boolean) {
-    if (!api || picking || sending.current) return;
+    if (!api || picking || sending.current || deletion.isDeleting()) return;
     setPicking(true);
     try {
       const selected = await pickQuestionPhoto(api, camera);
@@ -186,7 +193,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
     finally { if (alive.current) setPicking(false); }
   }
   async function startThread(message: Message) {
-    if (!api || !sid.current || busy) return;
+    if (!api || !sid.current || busy || deletion.isDeleting()) return;
     try {
       const parent = await api.request<Session>(`/api/sessions/${encodeURIComponent(sid.current)}`);
       ask(api, "请帮我进一步理解这条内容。", { selection_tutor_context: threadSource(parent, message.id), llm_selection: modelChoice });
@@ -244,7 +251,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
     }
   }
   async function send(override?: string, extra: Data = {}, resumeId = "") {
-    if (!api) return;
+    if (!api || deletion.isDeleting()) return;
     if (waitingRef.current && !resumeId) {
       if (replyPending.current) return;
       if (socket.current?.readyState !== WebSocket.OPEN) {
@@ -690,30 +697,8 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
                 accessibilityLabel="对话菜单"
                 accessibilityRole="button"
                 style={s.iconButton}
-                onPress={() =>
-                  Alert.alert("对话操作", "", [
-                    { text: "取消", style: "cancel" },
-                    ...(sessionId
-                      ? [
-                          {
-                            text: "修改标题",
-                            onPress: () => {
-                              setRenameText(title);
-                              setRename(true);
-                            },
-                          },
-                        ]
-                      : []),
-                    { text: "加入错题本", onPress: () => saveQuestion() },
-                    { text: "学习方式", onPress: () => setOptionsOpen(true) },
-                    {
-                      text: "查看学习过程",
-                      onPress: () => setTraceOpen((v) => !v),
-                    },
-                    { text: "恢复进度", onPress: () => void restoreProgress() },
-                    ...(sessionId ? [{ text: "查看单独追问", onPress: () => setThreadsOpen(true) }] : []),
-                  ])
-                }
+                disabled={!!deletion.deleting}
+                onPress={() => { Keyboard.dismiss(); setMenuOpen(true); }}
               >
                 <Icon name="ellipsis-horizontal" />
               </Pressable>
@@ -968,6 +953,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               />
             </View>
           ) : null}
+          {deletion.deleting ? <Text accessibilityLiveRegion="polite" style={s.muted}>正在删除对话…</Text> : null}
           {notice ? <Text style={s.muted}>{notice}</Text> : null}
           {draft.error ? <Text style={{ color: C.danger }}>草稿：{draft.error}</Text> : null}
           {error ? (
@@ -1089,7 +1075,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               placeholder="把问题告诉我…"
               value={text}
               onChangeText={value => { draft.edited(); setText(value); }}
-              editable={draft.ready && (!busy || waiting)}
+              editable={draft.ready && !deletion.deleting && (!busy || waiting)}
               multiline
               style={[
                 s.input,
@@ -1099,7 +1085,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="发送问题"
-              disabled={!draft.ready || (busy && !waiting) || !text.trim()}
+              disabled={!draft.ready || !!deletion.deleting || (busy && !waiting) || !text.trim()}
               onPress={() => void send()}
               style={{
                 backgroundColor: C.teal,
@@ -1116,6 +1102,20 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
           </View>
         </View>
       </KeyboardAvoidingView>
+      {menuOpen ? <FormModal onClose={() => setMenuOpen(false)}><Page>
+        <Heading title="对话操作" right={<Button title="关闭" compact secondary onPress={() => setMenuOpen(false)} />} />
+        <View style={{ gap: 12 }}>
+          {sessionId ? <Button title="修改标题" icon="create-outline" secondary onPress={() => { setMenuOpen(false); setRenameText(title); setRename(true); }} /> : null}
+          <Button title="加入错题本" icon="bookmark-outline" secondary onPress={() => { setMenuOpen(false); saveQuestion(); }} />
+          <Button title="学习方式" icon="options-outline" secondary onPress={() => { setMenuOpen(false); setOptionsOpen(true); }} />
+          <Button title={traceOpen ? "收起学习过程" : "查看学习过程"} icon="list-outline" secondary onPress={() => { setMenuOpen(false); setTraceOpen(v => !v); }} />
+          <Button title="恢复进度" icon="refresh-outline" secondary onPress={() => { setMenuOpen(false); void restoreProgress(); }} />
+          {sessionId ? <>
+            <Button title="查看单独追问" icon="chatbubbles-outline" secondary onPress={() => { setMenuOpen(false); setThreadsOpen(true); }} />
+            <Button title="删除对话" icon="trash-outline" secondary danger onPress={() => { setMenuOpen(false); deletion.confirm(sessionId, title); }} />
+          </> : null}
+        </View>
+      </Page></FormModal> : null}
       {threadsOpen ? <ChatThreads sessionId={sessionId} onClose={() => setThreadsOpen(false)} /> : null}
       {sourceOpen && source ? <ThreadSourceEditor sessionId={sessionId} source={source} onClose={() => setSourceOpen(false)} onSave={value => setContext(c => ({ ...c, selection_tutor_context: value }))} /> : null}
       {editingMessage ? <Editor title="修改后再问" fields={[{ key: "content", label: "问题内容", multiline: true, required: true, value: editingMessage.content }]} onClose={() => setEditingMessage(null)} beforeFields={() => <Text style={s.muted}>会保留原来的对话版本，并使用当前选择的模型重新回答。原附件也会保留。</Text>} onSave={async values => {

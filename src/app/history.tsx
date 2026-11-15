@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { useResource } from "../lib/resources";
 import { Session } from "../lib/client";
 import { Button, Empty, Failure, Heading, Loading, Page, Row, s } from "../ui";
+import { DeleteConversationButton } from "../features/conversation-delete";
 export default function History() {
   const [page, setPage] = useState(0);
   const r = useResource<{ sessions: Session[] }>(
@@ -12,7 +13,7 @@ export default function History() {
   );
   return (
     <Page>
-      <Heading title="历史对话" sub="继续之前的思考，也可以修改标题" back />
+      <Heading title="历史对话" sub="继续之前的思考，或删除不需要的对话" back />
       {r.loading && !r.data ? (
         <Loading />
       ) : r.error ? (
@@ -21,8 +22,7 @@ export default function History() {
         <Empty title="还没有对话" detail="向 DeepTutor 提出第一个问题吧。" />
       ) : (
         r.data.sessions.map((v) => (
-          <Row
-            key={v.id}
+          <View key={v.id} style={{ marginBottom: 14 }}><Row
             title={conversationTitle(v.title)}
             detail={`${v.message_count || 0} 条消息`}
             icon="chatbubble-ellipses-outline"
@@ -30,6 +30,10 @@ export default function History() {
               router.push({ pathname: "/chat/[id]", params: { id: v.id } })
             }
           />
+          <View style={{ alignSelf: 'flex-end' }}><DeleteConversationButton id={v.id} title={v.title || ''} onDeleted={async () => {
+            if (page > 0 && r.data?.sessions.length === 1) setPage(p => p - 1);
+            else await r.reload();
+          }} /></View></View>
         ))
       )}
       <View

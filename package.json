@@ -1,6 +1,6 @@
 {
   "name": "deeptutor-mobile",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -10,6 +10,7 @@
     "expo-asset": "~57.0.20",
     "expo-audio": "~57.0.5",
     "expo-build-properties": "~57.0.23",
+    "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.22",
     "expo-document-picker": "~57.0.3",
     "expo-file-system": "~57.0.7",

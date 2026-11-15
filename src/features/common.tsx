@@ -33,6 +33,7 @@ import { readingBlocks } from "../lib/reading-content";
 import { useLearningDisplay } from "../lib/learning-display-context";
 import { learningTextStyle } from "../lib/learning-display";
 import { selectedPreset, type TextPreset } from "../lib/study-presets";
+import { TextCopyActions } from "../components/TextCopyActions";
 
 export const enc = encodeURIComponent;
 export function feature(
@@ -317,6 +318,7 @@ export function Prose({ text, streaming = false }: { text: unknown; streaming?: 
           ]}>{block.text}</Text>
         )
       ))}
+      <TextCopyActions text={text} disabled={streaming} />
     </View>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Image, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { QuestionImage } from "../components/QuestionImage";
 import { Artifact } from "./artifact";
 import { artifactPayload } from "../lib/artifact-payload";
 import { VideoView, useVideoPlayer } from "expo-video";
@@ -55,7 +56,7 @@ function ProtectedMedia({ url, kind }: { url: string; kind: "image" | "audio" | 
     return () => { alive = false; };
   }, [api, url, kind, key]);
   if (result.key !== key || !result.uri) return <Text style={s.muted}>{result.key === key && result.error || "正在读取素材…"}</Text>;
-  return kind === "video" ? <Video key={result.uri} uri={result.uri} /> : kind === "audio" ? <Audio key={result.uri} uri={result.uri} /> : <Image source={{ uri: result.uri }} style={{ height: 300, width: "100%" }} resizeMode="contain" />;
+  return kind === "video" ? <Video key={result.uri} uri={result.uri} /> : kind === "audio" ? <Audio key={result.uri} uri={result.uri} /> : <QuestionImage key={result.uri} uri={result.uri} />;
 }
 export function QuestionCard({
   question,

@@ -18,6 +18,7 @@ export function useComposerDraft(api: TutorClient | null, route: string, fresh: 
   useLayoutEffect(() => { latest.current = value; restoreRef.current = restore; });
   const revision = useRef(0);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const discarded = useRef(new Set<string>());
   const scope = api?.scope || "";
   const key = `${scope}\u0000${route}`;
   const ready = loadedKey === key;
@@ -25,16 +26,17 @@ export function useComposerDraft(api: TutorClient | null, route: string, fresh: 
   const save = useCallback(() => {
     const current = latest.current;
     const operation = saveQueue.current.catch(() => {}).then(async () => {
-      if (!api || api.isClosed) return;
+      if (!api || api.isClosed || discarded.current.has(key)) return;
       const draft: ComposerDraft = { text: current.text, context: current.context, attachments: [] };
       if (current.photo) draft.attachments.push({ filename: current.photo.filename, base64: current.photo.base64, mime_type: "image/jpeg" });
       if (current.document) draft.attachments.push({ filename: current.document.name, mime_type: current.document.mimeType || "application/octet-stream", base64: await new File(current.document.uri).base64() });
       api.assertOpen();
+      if (discarded.current.has(key)) return;
       await composerDrafts.save(scope, route, draft);
     });
     saveQueue.current = operation;
     return operation;
-  }, [api, scope, route]);
+  }, [api, scope, route, key]);
   useEffect(() => {
     let active = true;
     const atStart = revision.current;
@@ -71,7 +73,11 @@ export function useComposerDraft(api: TutorClient | null, route: string, fresh: 
     });
     return () => subscription.remove();
   }, [ready, save]);
-  return { ready, error, edited: () => { revision.current++; }, flush: save, clear: () => {
+  return { ready, error, edited: () => { revision.current++; }, flush: save, discard: async () => {
+    discarded.current.add(key);
+    await saveQueue.current.catch(() => {});
+    await composerDrafts.save(scope, route, { text: '', attachments: [] });
+  }, clear: () => {
     latest.current = { ...latest.current, text: "", photo: undefined, document: null };
     return save();
   } };
