@@ -9,7 +9,6 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -29,6 +28,7 @@ import {
 } from "../../lib/photo-question";
 import { PrivateImage } from "../../components/PrivateImage";
 import { QuestionImage } from "../../components/QuestionImage";
+import { ChatComposer } from "../../components/ChatComposer";
 import { Photo, photoDraft, questionDraft, chatDraft } from "../../lib/drafts";
 import { Button, C, Empty, Field, Heading, Icon, Page, s } from "../../ui";
 
@@ -43,6 +43,7 @@ import { Content, Data, object, array, string } from "../../features/content";
 import {
   dialogueParts,
   conversationTitle,
+  compactConversationTitle,
   visibleMessage,
   cancelledTurn,
 } from "../../lib/conversation";
@@ -687,9 +688,9 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       >
         <View style={{ paddingHorizontal: 18 }}>
           <Heading
-            title={sessionId ? title : "问一问"}
+            title={sessionId ? compactConversationTitle(title, 12) : "问一问"}
             compact
-            titleLines={keyboardVisible ? 1 : undefined}
+            titleLines={1}
             sub={keyboardVisible ? undefined : `${personaLabels[options.persona] || options.persona} · ${capabilityLabels[options.capability] || options.capability}`}
             back
             right={
@@ -982,37 +983,6 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
             backgroundColor: C.white,
           }}
         >
-          {!busy && keyboardVisible ? (
-            <View style={{ alignSelf: "flex-start" }}>
-              <SmallAction title="学习工具" icon="options-outline" onPress={() => Keyboard.dismiss()} />
-            </View>
-          ) : !busy ? (
-            <View style={{ gap: 8 }}>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              <SmallAction
-                title="切换模型"
-                icon="hardware-chip-outline"
-                onPress={() => setModelOpen(true)}
-              />
-              <SmallAction
-                title="学习方式"
-                icon="options-outline"
-                onPress={() => setOptionsOpen(true)}
-              />
-              </View>
-              <Text style={s.muted}>当前模型：{selectedModel(models, modelChoice)?.model || (modelChoice ? "已选模型，请检查是否可用" : "服务默认")}</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              <SmallAction
-                title={picking ? "选择中…" : "文件"}
-                icon="attach-outline"
-                disabled={picking}
-                onPress={() => void chooseDocument()}
-              />
-              <SmallAction title="拍照" icon="camera-outline" onPress={() => void choosePhoto(true)} />
-              <SmallAction title="相册" icon="images-outline" onPress={() => void choosePhoto(false)} />
-              </View>
-            </View>
-          ) : null}
           {modelOpen && <ModelPicker value={modelChoice} onChange={setModelChoice} onClose={() => setModelOpen(false)} />}
           {document ? (
             <View
@@ -1067,45 +1037,29 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               <SmallAction title={stopping ? "停止中" : "停止"} icon="stop-circle-outline" disabled={stopping} onPress={stopTurn} />
             </View>
           )}
-          <View
-            style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}
-          >
-            <TextInput
-              accessibilityLabel="输入问题"
-              placeholder="把问题告诉我…"
-              value={text}
-              onChangeText={value => { draft.edited(); setText(value); }}
-              editable={draft.ready && !deletion.deleting && (!busy || waiting)}
-              multiline
-              style={[
-                s.input,
-                { flex: 1, maxHeight: 125, backgroundColor: C.bg },
-              ]}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="发送问题"
-              disabled={!draft.ready || !!deletion.deleting || (busy && !waiting) || !text.trim()}
-              onPress={() => void send()}
-              style={{
-                backgroundColor: C.teal,
-                borderRadius: 16,
-                width: 50,
-                height: 52,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: (busy && !waiting) || !text.trim() ? 0.4 : 1,
-              }}
-            >
-              <Icon name="arrow-up" color={C.white} />
-            </Pressable>
-          </View>
+          <ChatComposer
+            text={text}
+            onChangeText={value => { draft.edited(); setText(value); }}
+            editable={draft.ready && !deletion.deleting && (!busy || waiting)}
+            sendDisabled={!draft.ready || !!deletion.deleting || (busy && !waiting) || !text.trim()}
+            toolsDisabled={!draft.ready || !!deletion.deleting || busy || picking}
+            keyboardVisible={keyboardVisible}
+            onSend={() => void send()}
+            modelLabel={selectedModel(models, modelChoice)?.model || (modelChoice ? "已选模型，请检查是否可用" : "服务默认")}
+            tools={[
+              { key: "album", title: "相册", icon: "images-outline", onPress: () => void choosePhoto(false) },
+              { key: "camera", title: "拍照", icon: "camera-outline", onPress: () => void choosePhoto(true) },
+              { key: "file", title: "文件", icon: "attach-outline", onPress: () => void chooseDocument() },
+              { key: "model", title: "切换模型", icon: "hardware-chip-outline", onPress: () => setModelOpen(true) },
+              { key: "learning", title: "学习方式", icon: "options-outline", onPress: () => setOptionsOpen(true) },
+            ]}
+          />
         </View>
       </KeyboardAvoidingView>
       {menuOpen ? <FormModal onClose={() => setMenuOpen(false)}><Page>
         <Heading title="对话操作" right={<Button title="关闭" compact secondary onPress={() => setMenuOpen(false)} />} />
         <View style={{ gap: 12 }}>
-          {sessionId ? <Button title="修改标题" icon="create-outline" secondary onPress={() => { setMenuOpen(false); setRenameText(title); setRename(true); }} /> : null}
+          {sessionId ? <Button title="查看或修改标题" icon="create-outline" secondary onPress={() => { setMenuOpen(false); setRenameText(title); setRename(true); }} /> : null}
           <Button title="加入错题本" icon="bookmark-outline" secondary onPress={() => { setMenuOpen(false); saveQuestion(); }} />
           <Button title="学习方式" icon="options-outline" secondary onPress={() => { setMenuOpen(false); setOptionsOpen(true); }} />
           <Button title={traceOpen ? "收起学习过程" : "查看学习过程"} icon="list-outline" secondary onPress={() => { setMenuOpen(false); setTraceOpen(v => !v); }} />

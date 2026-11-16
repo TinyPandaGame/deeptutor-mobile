@@ -7,6 +7,12 @@ export function cancelledTurn(event: TurnEvent) {
   return event.type === "error" && /^Turn cancel(?:l)?ed\.?$/i.test(event.content?.trim() || "");
 }
 export function conversationTitle(title:string){return /^(New conversation|New chat|New reading conversation)$/i.test(title)?"学习对话":title||"学习对话";}
+// Display only: never write this shortened label back to a session or rename form.
+export function compactConversationTitle(title: string, limit = 16) {
+  const full = conversationTitle(title.replace(/\s+/g, " ").trim());
+  const characters = Array.from(full);
+  return characters.length > limit ? characters.slice(0, limit - 1).join("") + "…" : full;
+}
 export function dialogueParts(content:string,events:TurnEvent[]=[]):{role:"assistant"|"user";text:string}[]{
   const parts:{role:"assistant"|"user";text:string}[]=[];let offset=0;
   for(const event of events){const meta=event.metadata;if(!meta?.ask_user_resolved)continue;

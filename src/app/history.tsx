@@ -1,4 +1,4 @@
-import { conversationTitle } from "../lib/conversation";
+import { compactConversationTitle } from "../lib/conversation";
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { router } from "expo-router";
@@ -23,7 +23,7 @@ export default function History() {
       ) : (
         r.data.sessions.map((v) => (
           <View key={v.id} style={{ marginBottom: 14 }}><Row
-            title={conversationTitle(v.title)}
+            title={compactConversationTitle(v.title)}
             detail={`${v.message_count || 0} 条消息`}
             icon="chatbubble-ellipses-outline"
             onPress={() =>

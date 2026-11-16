@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { useResource } from "../lib/resources";
 import type { Session } from "../lib/client";
 import { threadSource, visibleBranch, type SourceContext } from "../lib/chat-actions";
+import { compactConversationTitle } from "../lib/conversation";
 import { Button, C, Heading, Page, Row, Section, s } from "../ui";
 import { FormModal, ResourceState, enc, useAction } from "./common";
 
@@ -13,7 +14,7 @@ export function ChatThreads({ sessionId, onClose }: { sessionId: string; onClose
   return <FormModal onClose={onClose}><Page>
     <Heading title="单独追问" right={<Button title="关闭" secondary onPress={onClose} />} />
     <ResourceState resource={r} empty={!r.data?.threads.length} />
-    {r.data?.threads.filter(t => !t.preferences?.archived).map(t => <Row key={t.id} title={t.title || "继续追问"} detail={t.preferences?.tutor_source_message_id ? "已关联原消息" : "围绕整段对话"} onPress={() => { onClose(); router.push({ pathname: "/chat/[id]", params: { id: t.id } }); }} />)}
+    {r.data?.threads.filter(t => !t.preferences?.archived).map(t => <Row key={t.id} title={compactConversationTitle(t.title || "继续追问")} detail={t.preferences?.tutor_source_message_id ? "已关联原消息" : "围绕整段对话"} onPress={() => { onClose(); router.push({ pathname: "/chat/[id]", params: { id: t.id } }); }} />)}
   </Page></FormModal>;
 }
 export function ThreadSourceEditor({ sessionId, source, onSave, onClose }: { sessionId: string; source: SourceContext; onSave: (value: SourceContext) => void; onClose: () => void }) {
