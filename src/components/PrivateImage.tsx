@@ -1,3 +1,4 @@
+import { useConversationCache } from "../lib/conversation-cache-context";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { useAuth } from "../lib/auth";
@@ -6,6 +7,7 @@ import { Button, s } from "../ui";
 import { QuestionImage } from "./QuestionImage";
 export function PrivateImage({ path }: { path: string }) {
   const { api } = useAuth();
+  const conversation = useConversationCache();
   const [attempt, setAttempt] = useState(0);
   const key = `${api?.scope}:${path}`;
   const [stored, setStored] = useState<{ key: string; uri: string } | null>(
@@ -29,7 +31,7 @@ export function PrivateImage({ path }: { path: string }) {
           if (alive && !api.isClosed)
             setStored({
               key,
-              uri: temporaryBytes(api, bytes, "attachment.jpg"),
+              uri: temporaryBytes(api, bytes, "attachment.jpg", conversation),
             });
         })
         .catch(() => {
@@ -40,7 +42,7 @@ export function PrivateImage({ path }: { path: string }) {
       alive = false;
       controller.abort();
     };
-  }, [api, path, key, attempt]);
+  }, [api, path, key, attempt, conversation]);
   if (error) return <View style={{ gap: 8, paddingVertical: 12 }}>
     <Text style={s.muted}>{error}</Text>
     <Button title="重新加载照片" secondary onPress={() => { setFailure(null); setStored(null); setAttempt(v => v + 1); }} />

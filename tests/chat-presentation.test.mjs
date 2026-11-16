@@ -165,3 +165,20 @@ test("conversation labels are short without changing original titles, numbers or
   }
   assert.equal(compactConversationTitle("🧮".repeat(20)), "🧮".repeat(15) + "…");
 });
+
+
+test("answer and notebook tools are on demand and independently disabled", () => {
+  const calls = [];
+  const tools = [
+    { key: 'answer', title: '提交答案', icon: 'add-outline', disabled: true, onPress: () => calls.push('answer') },
+    { key: 'mistake', title: '收进错题本', icon: 'add-outline', onPress: () => calls.push('mistake') },
+  ];
+  const ui = host({ tools });
+  assert.equal(ui.button('提交答案'), undefined);
+  ui.tap('更多功能');
+  assert.equal(ui.button('提交答案').props.disabled, true);
+  ui.button('提交答案').props.onPress(); assert.deepEqual(calls, []);
+  ui.tap('收进错题本'); assert.deepEqual(calls, ['mistake']);
+  assert.equal(ui.button('收进错题本'), undefined);
+  ui.unmount();
+});

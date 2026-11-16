@@ -19,6 +19,8 @@ export const composerDrafts = new ComposerDraftStore({
     const next = new File(directory, `v1-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
     next.write(content);
     if (await next.text() !== content) throw new Error("草稿没有完整保存，请保留当前输入后重试。");
-    for (const old of previous) { try { old.delete(); } catch { /* Retry cleanup on the next save. */ } }
+    let cleanupFailed = false;
+    for (const old of previous) { try { old.delete(); } catch { cleanupFailed = true; } }
+    if (cleanupFailed) throw Error("旧草稿文件未能清理完成，请重试清理。");
   },
 });

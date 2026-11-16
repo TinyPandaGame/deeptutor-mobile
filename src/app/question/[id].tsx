@@ -31,7 +31,7 @@ function NewQuestion() {
   const [explanation, setExplanation] = useState(draft?.explanation || "");
   const [busy, setBusy] = useState(false);
   const [id] = useState(
-    () => `mobile_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    () => draft?.question_id || `mobile_${Date.now()}_${Math.random().toString(36).slice(2)}`,
   );
   async function save() {
     if (!api || busy || !question.trim()) return;
@@ -47,6 +47,8 @@ function NewQuestion() {
           origin_ref: draft?.session_id || id,
           session_id: draft?.session_id || "",
           question_id: id,
+          turn_id: draft?.turn_id || "",
+          options: draft?.options || {},
           question: question.trim(),
           user_answer: answer,
           correct_answer: correct,

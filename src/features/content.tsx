@@ -1,3 +1,4 @@
+import { useConversationCache } from "../lib/conversation-cache-context";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { QuestionImage } from "../components/QuestionImage";
@@ -12,6 +13,8 @@ import { temporaryBytes } from "../lib/temporary-files";
 import { Button, C, Field, s } from "../ui";
 import { Chips, Prose, SmallAction } from "./common";
 import { GeneratedFile } from "./generated-file";
+import { useChatBubble } from "../lib/chat-bubble-context";
+import { questionOptions } from "../lib/chat-study";
 export type Data = Record<string, unknown>;
 export function object(value: unknown): Data {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -39,6 +42,7 @@ function Audio({ uri }: { uri: string }) {
 }
 function ProtectedMedia({ url, kind }: { url: string; kind: "image" | "audio" | "video" }) {
   const { api } = useAuth();
+  const conversation = useConversationCache();
   const key = `${api?.scope}:${url}`;
   const [result, setResult] = useState({ key: "", uri: "", error: "" });
   useEffect(() => {
@@ -49,35 +53,40 @@ function ProtectedMedia({ url, kind }: { url: string; kind: "image" | "audio" | 
         const bytes = await api.download(path);
         if (!alive) return;
         const suffix = /\.([a-zA-Z0-9]{1,6})$/.exec(path.split("?")[0])?.[1] || ({ image: "jpg", audio: "mp3", video: "mp4" }[kind]);
-        const uri = temporaryBytes(api, bytes, `media.${suffix}`);
+        const uri = temporaryBytes(api, bytes, `media.${suffix}`, conversation);
         setResult({ key, uri, error: "" });
       } catch (e) { if (alive) setResult({ key, uri: "", error: (e as Error).message }); }
     })();
     return () => { alive = false; };
-  }, [api, url, kind, key]);
+  }, [api, url, kind, key, conversation]);
   if (result.key !== key || !result.uri) return <Text style={s.muted}>{result.key === key && result.error || "正在读取素材…"}</Text>;
   return kind === "video" ? <Video key={result.uri} uri={result.uri} /> : kind === "audio" ? <Audio key={result.uri} uri={result.uri} /> : <QuestionImage key={result.uri} uri={result.uri} />;
 }
 export function QuestionCard({
   question,
   onAnswer,
+  showSave = true,
+  answerValue, onAnswerChange,
 }: {
   question: Data;
   onAnswer?: (text: string) => Promise<void>;
+  showSave?: boolean;
+  answerValue?: string; onAnswerChange?: (value: string) => void;
 }) {
+  const bubble = useChatBubble();
   const { api } = useAuth();
-  const [answer, setAnswer] = useState("");
+  const [localAnswer, setLocalAnswer] = useState("");
+  const answer = answerValue ?? localAnswer;
+  const setAnswer = (value: string) => { setLocalAnswer(value); onAnswerChange?.(value); };
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const options = Array.isArray(question.options)
-    ? Object.fromEntries(
-        question.options.map((x) => [
-          string(object(x).label),
-          string(object(x).body),
-        ]),
-      )
-    : object(question.options);
+  const options = questionOptions(question.options);
+  if (bubble) return <View style={{ gap: 8 }}>
+    <Prose text={question.question || question.prompt} />
+    {Object.entries(options).map(([label, body]) => <Text key={label} style={s.text}
+      onLongPress={() => bubble(string(question.question || question.prompt))}>{label}  {String(body)}</Text>)}
+  </View>;
   return (
     <View style={[s.card, { gap: 12 }]}>
       <Prose text={question.question || question.prompt} />
@@ -115,7 +124,7 @@ export function QuestionCard({
         }}
       />
       {error ? <Text style={{ color: C.danger }}>{error}</Text> : null}
-      <SmallAction
+      {showSave && <SmallAction
         title="收进错题本"
         onPress={() => {
           if (api) {
@@ -128,7 +137,7 @@ export function QuestionCard({
             router.push("/question/new");
           }
         }}
-      />
+      />}
       {revealed ? (
         <>
           <Prose text={question.correct_answer} />

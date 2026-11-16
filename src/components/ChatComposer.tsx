@@ -7,6 +7,7 @@ export type ComposerTool = {
   title: string;
   icon: IconName;
   onPress: () => void;
+  disabled?: boolean;
 };
 
 export function ChatComposer({ text, onChangeText, onSend, editable, sendDisabled, toolsDisabled,
@@ -41,7 +42,7 @@ export function ChatComposer({ text, onChangeText, onSend, editable, sendDisable
     }
   };
   const choose = (tool: ComposerTool) => {
-    if (toolsDisabled) return;
+    if (toolsDisabled || tool.disabled) return;
     setExpanded(false);
     input.current?.blur();
     Keyboard.dismiss();
@@ -76,7 +77,8 @@ export function ChatComposer({ text, onChangeText, onSend, editable, sendDisable
       style={{ maxHeight: 240 }} contentContainerStyle={styles.panel}>
       <View style={styles.grid}>
         {tools.map(tool => <Pressable key={tool.key} accessibilityRole="button" accessibilityLabel={tool.title}
-          onPress={() => choose(tool)} style={({ pressed }) => [styles.tool, pressed && { opacity: 0.6 }]}>
+          disabled={tool.disabled} accessibilityState={{ disabled: !!tool.disabled }}
+          onPress={() => choose(tool)} style={({ pressed }) => [styles.tool, (pressed || tool.disabled) && { opacity: 0.4 }]}>
           <View style={styles.toolIcon}><Icon name={tool.icon} size={27} /></View>
           <Text style={styles.toolText}>{tool.title}</Text>
         </Pressable>)}

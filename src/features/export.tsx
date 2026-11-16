@@ -1,3 +1,4 @@
+import { useConversationCache } from "../lib/conversation-cache-context";
 import { useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 import { temporaryBytes } from "../lib/temporary-files";
@@ -22,6 +23,7 @@ export function ExportFile({
   title?: string;
 }) {
   const { api } = useAuth();
+  const conversation = useConversationCache();
   const [busy, setBusy] = useState(false);
   const transfer = useRef<AbortController | null>(null);
   useEffect(() => () => transfer.current?.abort(), [api]);
@@ -55,7 +57,7 @@ export function ExportFile({
       const name = filename
         .replace(/[\\/:*?"<>|\x00-\x1f]/g, "-")
         .slice(0, 100);
-      const uri = temporaryBytes(api, bytes, name);
+      const uri = temporaryBytes(api, bytes, name, conversation);
       await Sharing.shareAsync(uri, {
         mimeType: mime,
         dialogTitle: "保存或分享学习资料",

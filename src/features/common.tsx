@@ -28,6 +28,7 @@ import { useAuth } from "../lib/auth";
 import { TutorClient } from "../lib/client";
 import { chatDraft } from "../lib/drafts";
 import { MathProse } from "./math";
+import { useChatBubble } from "../lib/chat-bubble-context";
 import { hasMath } from "../lib/math-markup";
 import { readingBlocks } from "../lib/reading-content";
 import { useLearningDisplay } from "../lib/learning-display-context";
@@ -303,6 +304,7 @@ export function SmallAction({
 // HTML is never evaluated here and server content cannot navigate the app.
 export function Prose({ text, streaming = false }: { text: unknown; streaming?: boolean }) {
   const { value: display } = useLearningDisplay();
+  const bubble = useChatBubble();
   if (typeof text !== "string" || !text.trim()) return null;
   return (
     <View style={{ gap: 9 }}>
@@ -310,7 +312,7 @@ export function Prose({ text, streaming = false }: { text: unknown; streaming?: 
         block.kind !== "code" && hasMath(block.text) ? (
           <MathProse key={i} text={block.text} streaming={streaming} />
         ) : (
-          <Text key={i} selectable style={[
+          <Text key={i} selectable={!bubble} onLongPress={bubble ? () => bubble(text) : undefined} style={[
             s.text,
             learningTextStyle(display, block.kind === "heading" ? 18 : 16),
             block.kind === "heading" && { fontWeight: "700", marginTop: 4 },
@@ -318,7 +320,7 @@ export function Prose({ text, streaming = false }: { text: unknown; streaming?: 
           ]}>{block.text}</Text>
         )
       ))}
-      <TextCopyActions text={text} disabled={streaming} />
+      {!bubble && <TextCopyActions text={text} disabled={streaming} />}
     </View>
   );
 }

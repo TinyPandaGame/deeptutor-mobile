@@ -51,7 +51,7 @@ export function useComposerDraft(api: TutorClient | null, route: string, fresh: 
             if (a.mime_type.startsWith("image/")) photo = { filename: a.filename, base64: a.base64, uri: `data:${a.mime_type};base64,${a.base64}` };
             else {
               const bytes = Uint8Array.from(atob(a.base64), c => c.charCodeAt(0));
-              document = { name: a.filename, mimeType: a.mime_type, size: bytes.byteLength, lastModified: Date.now(), uri: temporaryBytes(api, bytes.buffer, "draft-attachment" + (/\.[a-z0-9]+$/i.exec(a.filename)?.[0] || ".bin")) };
+              document = { name: a.filename, mimeType: a.mime_type, size: bytes.byteLength, lastModified: Date.now(), uri: temporaryBytes(api, bytes.buffer, "draft-attachment" + (/\.[a-z0-9]+$/i.exec(a.filename)?.[0] || ".bin"), route) };
             }
           }
           restoreRef.current({ text: draft.text, photo, document, context: draft.context || {} });

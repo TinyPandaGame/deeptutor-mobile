@@ -4,7 +4,11 @@ import { mathMarkup } from "../lib/math-markup";
 import { katexStyle } from "./katex-style";
 import { useLearningDisplay } from "../lib/learning-display-context";
 import { learningTextStyle } from "../lib/learning-display";
+import { useChatBubble } from "../lib/chat-bubble-context";
+import { chatLongPressScript } from "../lib/chat-long-press";
 export function MathProse({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  const bubble = useChatBubble();
+  const inChat = !!bubble;
   const { value: display } = useLearningDisplay();
   const { fontSize, lineHeight } = learningTextStyle(display);
   const [height, setHeight] = useState(80);
@@ -15,7 +19,7 @@ export function MathProse({ text, streaming = false }: { text: string; streaming
   );
   return (
     <WebView
-      source={{ html, baseUrl: "about:blank" }}
+      source={{ html: inChat ? html.replace('</script>', `${chatLongPressScript}</script>`) : html, baseUrl: "about:blank" }}
       style={{ height, backgroundColor: "transparent" }}
       scrollEnabled={false}
       originWhitelist={["about:blank"]}
@@ -29,6 +33,7 @@ export function MathProse({ text, streaming = false }: { text: string; streaming
       javaScriptCanOpenWindowsAutomatically={false}
       mixedContentMode="never"
       onMessage={(e) => {
+        if (e.nativeEvent.data === 'chat-long-press') { bubble?.(text); return; }
         const n = Number(e.nativeEvent.data);
         if (Number.isFinite(n) && n > 0 && n < 30000)
           setHeight(Math.ceil(n) + 2);

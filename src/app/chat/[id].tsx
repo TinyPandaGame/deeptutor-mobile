@@ -1,4 +1,6 @@
-import { ownTemporaryFile } from "../../lib/temporary-files";
+import { subscribeConversationDeletion } from "../../lib/conversation-lifecycle";
+import { ConversationCacheContext } from "../../lib/conversation-cache-context";
+import { ownTemporaryFile, assignConversationFile } from "../../lib/temporary-files";
 import { pickQuestionPhoto } from "../../lib/pick-photo";
 import { isImageAttachment, outgoingAttachments } from "../../lib/chat-attachments";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +21,8 @@ import { useAuth } from "../../lib/auth";
 import {
   Session,
   TurnEvent,
+  ApiError,
+  Question,
   ChatAttachment,
   streamText,
 } from "../../lib/client";
@@ -29,6 +33,10 @@ import {
 import { PrivateImage } from "../../components/PrivateImage";
 import { QuestionImage } from "../../components/QuestionImage";
 import { ChatComposer } from "../../components/ChatComposer";
+import { MessageActions } from "../../components/MessageActions";
+import { ChatBubbleContext } from "../../lib/chat-bubble-context";
+import { judgeVerdict, questionOptions, questionSubmission, recordedMasteryMistakes, saveJudgedMistake, studyQuestions, type StudyQuestion } from "../../lib/chat-study";
+import { judgeQuizAnswer, type JudgeSocket } from "../../lib/quiz-judge";
 import { Photo, photoDraft, questionDraft, chatDraft } from "../../lib/drafts";
 import { Button, C, Empty, Field, Heading, Icon, Page, s } from "../../ui";
 
@@ -39,7 +47,7 @@ import {
   capabilityLabels,
   personaLabels,
 } from "../../features/capabilities";
-import { Content, Data, object, array, string } from "../../features/content";
+import { Content, QuestionCard, Data, object, array, string } from "../../features/content";
 import {
   dialogueParts,
   conversationTitle,
@@ -49,7 +57,6 @@ import {
 } from "../../lib/conversation";
 import { Chips, Editor, FormModal, Prose, SmallAction, ask } from "../../features/common";
 import { useConversationDelete } from "../../features/conversation-delete";
-import { ReadAloud } from '../../features/read-aloud';
 import { GeneratedFile } from "../../features/generated-file";
 import { ChatThreads, ThreadSourceEditor } from "../../features/chat-threads";
 import { tutorSource, threadSource, visibleBranch, type SourceContext } from "../../lib/chat-actions";
@@ -103,6 +110,15 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [removed, setRemoved] = useState(false);
+  const [messageMenu, setMessageMenu] = useState<{ message: Message; text: string } | null>(null);
+  const [answerOpen, setAnswerOpen] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [answerKey, setAnswerKey] = useState('');
+  const [judging, setJudging] = useState(false);
+  const [studyAnswers, setStudyAnswers] = useState<Record<string, string>>({});
+  const answerAbort = useRef<AbortController | null>(null);
+  const judgedAnswers = useRef(new Map<string, string>());
   const [branches, setBranches] = useState<Record<string, number>>({});
   const [initialDraft] = useState(() =>
     api ? chatDraft.take(api) : undefined,
@@ -139,6 +155,9 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
     api ? photoDraft.peek(api) : undefined,
   );
   const [messages, setMessages] = useState<Message[]>([]);
+  const questions = useMemo(() => studyQuestions(visibleBranch(messages, branches)), [messages, branches]);
+  const activeQuestion = questions.find(q => q.key === answerKey) || questions.at(-1);
+  useEffect(() => () => answerAbort.current?.abort(), []);
   const [text, setText] = useState(
     initialPhoto
       ? PHOTO_QUESTION_PROMPT
@@ -174,9 +193,22 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       setModelChoice(selection(value.context.llm_selection));
     }
   });
+  useEffect(() => {
+    if (!api) return;
+    return subscribeConversationDeletion(api, ids => {
+      if (!ids.includes(sid.current || id)) return;
+      alive.current = false;
+      answerAbort.current?.abort();
+      socket.current?.close(); socket.current = null;
+      judgedAnswers.current.clear();
+      setMessages([]); setPhoto(undefined); setDocument(null); setText('');
+      setMessageMenu(null); setAnswerOpen(false); setRecordOpen(false); setRemoved(true);
+    });
+  }, [api, id]);
   const source = context.selection_tutor_context as SourceContext | undefined;
   const deletion = useConversationDelete(async () => {
     alive.current = false;
+    answerAbort.current?.abort();
     socket.current?.close(); socket.current = null;
     try { await draft.discard(); } finally { router.replace('/history'); }
   });
@@ -184,7 +216,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
     if (!api || picking || sending.current || deletion.isDeleting()) return;
     setPicking(true);
     try {
-      const selected = await pickQuestionPhoto(api, camera);
+      const selected = await pickQuestionPhoto(api, camera, sid.current || id);
       if (selected && alive.current) {
         draft.edited();
         setPhoto(selected);
@@ -243,7 +275,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       if (!/\.(pdf|docx|txt)$/i.test(file.name))
         throw new Error("请选择 PDF、DOCX 或 TXT 文件。");
       if (!api) return;
-      file.uri = await ownTemporaryFile(api, file.uri, file.name);
+      file.uri = await ownTemporaryFile(api, file.uri, file.name, sid.current || id);
       setDocument(file);
     } catch (e) {
       Alert.alert("未能添加附件", (e as Error).message);
@@ -440,6 +472,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
             waitingRef.current = false;
             setWaiting(false);
             setWaitingCard(null);
+            setAnswerOpen(false);
             setAnswers({});
             setText("");
             setStatus("正在继续讲解…");
@@ -468,6 +501,8 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               void draft.clear().catch(e => setNotice(`已提交，但草稿清理失败：${e.message}`));
             }
           }
+          if (photo?.uri) assignConversationFile(api, photo.uri, event.session_id);
+          if (document?.uri) assignConversationFile(api, document.uri, event.session_id);
           sid.current = event.session_id;
           setSessionId(event.session_id);
         }
@@ -484,6 +519,13 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
         }
         const meta = object(event.metadata);
         const tool = object(meta.tool_metadata);
+        if (sid.current && (tool.mastery_grade || meta.mastery_grade) && ['tool_result', 'result'].includes(event.type)) {
+          void recordedMasteryMistakes(api, sid.current, event).then(rows => {
+            if (rows.length && alive.current && !api.isClosed && !deletion.isDeleting()) setNotice('答错的题已自动收进错题本。');
+          }).catch(() => {
+            if (alive.current && !api.isClosed) setNotice('暂时无法确认错题收录，可在底部“＋”中查看或记录。');
+          });
+        }
         const asked = object(tool.ask_user || meta.ask_user);
         if (Object.keys(asked).length && asked.kind !== "mastery_question") {
           setWaitingCard(asked);
@@ -678,8 +720,55 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       }
     }
   }
+  function closeAnswers() { answerAbort.current?.abort(); setAnswerOpen(false); }
+  async function submitStudyAnswer(q: StudyQuestion, answer: string) {
+    if (!api || !alive.current || sending.current || judging || answerAbort.current || deletion.isDeleting()) throw Error('请等待当前操作完成。');
+    const controller = new AbortController(); answerAbort.current = controller;
+    const assertActive = () => { api.assertOpen(); if (!alive.current || controller.signal.aborted || deletion.isDeleting()) throw Error('已取消这次操作。'); };
+    setJudging(true);
+    try {
+      let feedback = '', collected = false;
+      if (!q.mastery) {
+        const key = JSON.stringify([q.key, answer]);
+        feedback = judgedAnswers.current.get(key) || await judgeQuizAnswer(api, q, answer,
+          (url, headers) => new NativeSocket(url, null, { headers }) as unknown as JudgeSocket, controller.signal);
+        assertActive(); judgedAnswers.current.set(key, feedback);
+        if (judgedAnswers.current.size > 30) judgedAnswers.current.delete(judgedAnswers.current.keys().next().value!);
+        const saved = await saveJudgedMistake(api, sid.current, q, answer, feedback, judgeVerdict(feedback), assertActive);
+        collected = !!saved;
+      }
+      assertActive(); setStudyAnswers(old => ({ ...old, [q.key]: answer }));
+      const submission = questionSubmission(q, answer, feedback, judgeVerdict(feedback));
+      const accepted = await send(submission.content, submission.context);
+      assertActive();
+      if (!accepted) throw Error('答案未能提交到对话，请重试。已经收录的错题不会重复新建。');
+      setAnswerOpen(false);
+      if (collected) setNotice('答错的题已自动收进错题本。');
+    } finally { if (answerAbort.current === controller) answerAbort.current = null; if (alive.current) setJudging(false); }
+  }
+  async function recordStudyQuestion(q: StudyQuestion) {
+    if (!api || deletion.isDeleting()) return;
+    try {
+      const questionId = string(q.data.question_id) || `mobile:${q.key}`;
+      try {
+        const saved = await api.request<Question>(`/api/question-notebook/entries/lookup/by-question?session_id=${encodeURIComponent(sid.current)}&question_id=${encodeURIComponent(questionId)}&turn_id=${encodeURIComponent(q.turnId)}`);
+        if (!alive.current || api.isClosed) return;
+        if (saved?.id) { setRecordOpen(false); router.push(`/question/${saved.id}`); return; }
+      } catch (e) { if (!(e instanceof ApiError && e.status === 404)) throw e; }
+      api.assertOpen(); if (!alive.current) return;
+      questionDraft.set(api, { question: string(q.data.question || q.data.prompt), correct_answer: string(q.data.correct_answer),
+        explanation: string(q.data.explanation), user_answer: studyAnswers[q.key] || string(q.data.user_answer),
+        options: questionOptions(q.data.options), session_id: sid.current, turn_id: q.turnId, question_id: questionId });
+      setRecordOpen(false); router.push('/question/new');
+    } catch (e) { if (alive.current) Alert.alert('暂时不能记录', (e as Error).message); }
+  }
+  function openMessage(message: Message, text = message.content) {
+    if (busy || judging || deletion.isDeleting()) return;
+    Keyboard.dismiss(); setMessageMenu({ message, text });
+  }
+  if (removed) return <Page><Heading title="对话已删除" /><Empty title="聊天记录已清除" detail="已收进错题本的题目仍然保留。" /><Button title="返回历史对话" onPress={() => router.replace('/history')} /></Page>;
   return (
-    <Page scroll={false}>
+    <ConversationCacheContext.Provider value={sessionId || id}><Page scroll={false}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior="padding"
@@ -744,12 +833,18 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               visibleMessage(m, busy && i === messages.length - 1),
             )
             .map((m, i) => (
-              <View
+              <ChatBubbleContext.Provider key={m.id || String(i)} value={text => openMessage(m, text)}>
+              <Pressable
                 key={m.id || String(i)}
+                onLongPress={() => openMessage(m)}
+                accessibilityHint="长按打开消息操作"
                 style={[
                   s.card,
                   {
-                    padding: 17,
+                    padding: 12,
+                    borderRadius: 16,
+                    borderTopLeftRadius: m.role === 'assistant' ? 4 : 16,
+                    borderTopRightRadius: m.role === 'user' ? 4 : 16,
                     backgroundColor: m.role === "user" ? C.pale : C.white,
                     alignSelf: m.role === "user" ? "flex-end" : "flex-start",
                     maxWidth: "95%",
@@ -765,17 +860,6 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
                 <Text style={[s.muted, { marginBottom: 7 }]}>
                   {m.role === "user" ? "我" : "DeepTutor"}
                 </Text>
-                {!busy && sessionId && !String(m.id).startsWith("mobile_") ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  <SmallAction title="单独追问" onPress={() => void startThread(m)} />
-                  {m.role === "user" && /^\d+$/.test(String(m.id)) ? <SmallAction title="修改后再问" onPress={() => setEditingMessage(m)} /> : null}
-                </View> : null}
-                {!busy && Object.hasOwn(m, "parent_message_id") && messages.filter(x => (x.parent_message_id ?? null) === (m.parent_message_id ?? null)).length > 1 ? <Chips
-                  value={String(m.id)}
-                  items={messages.filter(x => (x.parent_message_id ?? null) === (m.parent_message_id ?? null)).map((x, index) => ({ value: String(x.id), label: `版本 ${index + 1}` }))}
-                  onChange={value => {
-                    const next = { ...branches, [String(m.parent_message_id ?? null)]: Number(value) };
-                    void api?.json(`/api/sessions/${encodeURIComponent(sessionId)}/branch-selection`, { selected_branches: next }, "PUT").then(() => setBranches(next)).catch(e => Alert.alert("未能切换", e.message));
-                  }} /> : null}
                 {m.role === "user" &&
                   m.attachments
                     ?.filter(isImageAttachment)
@@ -789,13 +873,6 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
                         />
                       ) : null,
                     )}
-                {m.role === "user" &&
-                m.attachments?.some(isImageAttachment) ? (
-                  <SmallAction
-                    title="记录这道拍照题"
-                    onPress={() => saveQuestion(m.id)}
-                  />
-                ) : null}
                 {m.attachments?.filter(a => a.url && (m.role === "assistant" || !isImageAttachment(a))).map((a, index) => <GeneratedFile key={index} url={a.url!} filename={a.filename} mime={a.mime_type} />)}
                 {m.role === "user" ? (
                   <Prose text={m.content} />
@@ -821,7 +898,6 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
                         <Text style={s.label}>我的回答</Text>
                       ) : null}
                       <Prose text={part.text} streaming={busy && i === messages.length - 1} />
-                      <ReadAloud text={part.text} conversation={sessionId || 'new'} disabled={busy} />
                     </View>
                   ))
                 )}
@@ -904,56 +980,16 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
                       </View>
                     );
                   })}
-              </View>
+              </Pressable>
+              </ChatBubbleContext.Provider>
             ))}
-          {waitingCard ? (
-            <View style={[s.card, { gap: 12 }]}>
+          {waitingCard ? <ChatBubbleContext.Provider value={() => { Keyboard.dismiss(); setAnswerOpen(true); }}>
+            <View style={[s.card, { gap: 8 }]}>
               <Text style={s.h2}>轮到你想一想</Text>
-              <Prose text={waitingCard.question} />
-              {array(waitingCard.questions).map((q, i) => {
-                const item = object(q);
-                const key = string(item.id) || String(i);
-                const choices = array(item.options);
-                return (
-                  <View key={key} style={{ gap: 8 }}>
-                    <Prose text={item.prompt} />
-                    {choices.length ? (
-                      <Chips
-                        value={answers[key] || ""}
-                        onChange={(v) =>
-                          setAnswers((a) => ({ ...a, [key]: v }))
-                        }
-                        items={choices.map((c, j) =>
-                          typeof c === "string"
-                            ? { value: c, label: c }
-                            : {
-                                value: string(object(c).label) || String(j),
-                                label:
-                                  string(object(c).label) ||
-                                  string(object(c).text) ||
-                                  string(object(c).body),
-                              },
-                        )}
-                      />
-                    ) : null}
-                    <Field
-                      label="你的想法"
-                      value={answers[key] || ""}
-                      onChangeText={(v) =>
-                        setAnswers((a) => ({ ...a, [key]: v }))
-                      }
-                      multiline
-                    />
-                  </View>
-                );
-              })}
-              <Button
-                title="提交回答并继续"
-                busy={replyBusy}
-                onPress={() => void send()}
-              />
+              <Content value={waitingCard} />
+              <Text style={s.muted}>点底部“＋ → 提交答案”继续，也可以在输入框直接回答。</Text>
             </View>
-          ) : null}
+          </ChatBubbleContext.Provider> : null}
           {deletion.deleting ? <Text accessibilityLiveRegion="polite" style={s.muted}>正在删除对话…</Text> : null}
           {notice ? <Text style={s.muted}>{notice}</Text> : null}
           {draft.error ? <Text style={{ color: C.danger }}>草稿：{draft.error}</Text> : null}
@@ -1040,27 +1076,112 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
           <ChatComposer
             text={text}
             onChangeText={value => { draft.edited(); setText(value); }}
-            editable={draft.ready && !deletion.deleting && (!busy || waiting)}
-            sendDisabled={!draft.ready || !!deletion.deleting || (busy && !waiting) || !text.trim()}
-            toolsDisabled={!draft.ready || !!deletion.deleting || busy || picking}
+            editable={draft.ready && !deletion.deleting && !judging && !replyBusy && (!busy || waiting)}
+            sendDisabled={!draft.ready || !!deletion.deleting || judging || replyBusy || (busy && !waiting) || !text.trim()}
+            toolsDisabled={!draft.ready || !!deletion.deleting || (busy && !waiting) || picking || judging}
             keyboardVisible={keyboardVisible}
             onSend={() => void send()}
             modelLabel={selectedModel(models, modelChoice)?.model || (modelChoice ? "已选模型，请检查是否可用" : "服务默认")}
             tools={[
-              { key: "album", title: "相册", icon: "images-outline", onPress: () => void choosePhoto(false) },
-              { key: "camera", title: "拍照", icon: "camera-outline", onPress: () => void choosePhoto(true) },
-              { key: "file", title: "文件", icon: "attach-outline", onPress: () => void chooseDocument() },
-              { key: "model", title: "切换模型", icon: "hardware-chip-outline", onPress: () => setModelOpen(true) },
-              { key: "learning", title: "学习方式", icon: "options-outline", onPress: () => setOptionsOpen(true) },
+              { key: "answer", title: "提交答案", icon: "checkmark-circle-outline", disabled: !waitingCard && !questions.length, onPress: () => setAnswerOpen(true) },
+              { key: "mistake", title: "收进错题本", icon: "bookmark-outline", disabled: !messages.length, onPress: () => setRecordOpen(true) },
+              { key: "album", disabled: busy, title: "相册", icon: "images-outline", onPress: () => void choosePhoto(false) },
+              { key: "camera", disabled: busy, title: "拍照", icon: "camera-outline", onPress: () => void choosePhoto(true) },
+              { key: "file", disabled: busy, title: "文件", icon: "attach-outline", onPress: () => void chooseDocument() },
+              { key: "model", disabled: busy, title: "切换模型", icon: "hardware-chip-outline", onPress: () => setModelOpen(true) },
+              { key: "learning", disabled: busy, title: "学习方式", icon: "options-outline", onPress: () => setOptionsOpen(true) },
             ]}
           />
         </View>
       </KeyboardAvoidingView>
+      {answerOpen ? <FormModal onClose={closeAnswers}><Page>
+        <Heading title="提交答案" right={<Button title="关闭" secondary onPress={closeAnswers} />} />
+        {waitingCard ? null : <>
+          {questions.length > 1 && <Chips value={activeQuestion?.key || ''}
+            items={questions.map((q, i) => ({ value: q.key, label: `第 ${i + 1} 题` }))} onChange={setAnswerKey} />}
+          {activeQuestion ? <QuestionCard key={activeQuestion.key} question={activeQuestion.data} showSave={false} answerValue={studyAnswers[activeQuestion.key] || ""}
+            onAnswerChange={value => setStudyAnswers(old => ({ ...old, [activeQuestion.key]: value }))}
+            onAnswer={answer => submitStudyAnswer(activeQuestion, answer)} /> : <Text style={s.muted}>还没有可作答的题目，可以先请 DeepTutor 出一道题。</Text>}
+          {judging && <Text accessibilityLiveRegion="polite" style={s.muted}>正在判题，答错的题会自动收进错题本…</Text>}
+        </>}
+          {waitingCard ? (
+            <View style={[s.card, { gap: 12 }]}>
+              <Text style={s.h2}>轮到你想一想</Text>
+              <Prose text={waitingCard.question} />
+              {!array(waitingCard.questions).length && <Field label="你的想法" multiline editable={!replyBusy} value={text} onChangeText={value => { draft.edited(); setText(value); }} />}
+              {array(waitingCard.questions).map((q, i) => {
+                const item = object(q);
+                const key = string(item.id) || String(i);
+                const choices = array(item.options);
+                return (
+                  <View key={key} style={{ gap: 8 }}>
+                    <Prose text={item.prompt} />
+                    {choices.length ? (
+                      <Chips
+                        value={answers[key] || ""}
+                        onChange={(v) =>
+                          !replyPending.current && setAnswers((a) => ({ ...a, [key]: v }))
+                        }
+                        items={choices.map((c, j) =>
+                          typeof c === "string"
+                            ? { value: c, label: c }
+                            : {
+                                value: string(object(c).label) || String(j),
+                                label:
+                                  string(object(c).label) ||
+                                  string(object(c).text) ||
+                                  string(object(c).body),
+                              },
+                        )}
+                      />
+                    ) : null}
+                    <Field
+                      label="你的想法"
+                      editable={!replyBusy}
+                      value={answers[key] || ""}
+                      onChangeText={(v) =>
+                        setAnswers((a) => ({ ...a, [key]: v }))
+                      }
+                      multiline
+                    />
+                  </View>
+                );
+              })}
+              <Button
+                title="提交答案"
+                busy={replyBusy}
+                onPress={() => void send()}
+              />
+            </View>
+          ) : null}
+      </Page></FormModal> : null}
+      {recordOpen ? <FormModal onClose={() => setRecordOpen(false)}><Page>
+        <Heading title="收进错题本" right={<Button title="关闭" secondary onPress={() => setRecordOpen(false)} />} />
+        <Text style={s.muted}>已自动收录的题会打开原记录，不会再新建一份。</Text>
+        {[...questions].reverse().map(q => <Button key={q.key} secondary
+          title={compactConversationTitle(string(q.data.question || q.data.prompt), 24)} onPress={() => void recordStudyQuestion(q)} />)}
+        {messages.filter(m => m.role === 'user').slice().reverse().map((m, i) => <Button key={m.id} secondary
+          title={`${m.attachments?.some(isImageAttachment) ? '拍照题' : '我的提问'} ${messages.filter(x => x.role === 'user').length - i}：${compactConversationTitle(m.content, 16)}`}
+          onPress={() => { setRecordOpen(false); saveQuestion(m.id); }} />)}
+        {!messages.length && <Text style={s.muted}>先发送题目或照片，再从这里校对记录。</Text>}
+      </Page></FormModal> : null}
+      {messageMenu ? <MessageActions text={messageMenu.text} conversation={sessionId} onClose={() => setMessageMenu(null)}>
+        {sessionId && !String(messageMenu.message.id).startsWith('mobile_') ? <>
+          <Button title="单独追问" secondary icon="chatbubbles-outline" onPress={() => { const m = messageMenu.message; setMessageMenu(null); void startThread(m); }} />
+          {messageMenu.message.role === 'user' && /^\d+$/.test(String(messageMenu.message.id)) && <Button title="修改后再问" secondary icon="create-outline"
+            onPress={() => { setEditingMessage(messageMenu.message); setMessageMenu(null); }} />}
+        </> : null}
+        {Object.hasOwn(messageMenu.message, 'parent_message_id') && messages.filter(x => (x.parent_message_id ?? null) === (messageMenu.message.parent_message_id ?? null)).length > 1 ? <View style={{ gap: 8 }}>
+          <Text style={s.label}>切换对话版本</Text>
+          <Chips value={String(messageMenu.message.id)} items={messages.filter(x => (x.parent_message_id ?? null) === (messageMenu.message.parent_message_id ?? null)).map((x, i) => ({ value: String(x.id), label: `版本 ${i + 1}` }))}
+            onChange={value => { const next = { ...branches, [String(messageMenu.message.parent_message_id ?? null)]: Number(value) };
+              void api?.json(`/api/sessions/${encodeURIComponent(sessionId)}/branch-selection`, { selected_branches: next }, 'PUT').then(() => { setBranches(next); setMessageMenu(null); }).catch(e => Alert.alert('未能切换', e.message)); }} />
+        </View> : null}
+      </MessageActions> : null}
       {menuOpen ? <FormModal onClose={() => setMenuOpen(false)}><Page>
         <Heading title="对话操作" right={<Button title="关闭" compact secondary onPress={() => setMenuOpen(false)} />} />
         <View style={{ gap: 12 }}>
           {sessionId ? <Button title="查看或修改标题" icon="create-outline" secondary onPress={() => { setMenuOpen(false); setRenameText(title); setRename(true); }} /> : null}
-          <Button title="加入错题本" icon="bookmark-outline" secondary onPress={() => { setMenuOpen(false); saveQuestion(); }} />
           <Button title="学习方式" icon="options-outline" secondary onPress={() => { setMenuOpen(false); setOptionsOpen(true); }} />
           <Button title={traceOpen ? "收起学习过程" : "查看学习过程"} icon="list-outline" secondary onPress={() => { setMenuOpen(false); setTraceOpen(v => !v); }} />
           <Button title="恢复进度" icon="refresh-outline" secondary onPress={() => { setMenuOpen(false); void restoreProgress(); }} />
@@ -1109,6 +1230,6 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
           }}
         />
       ) : null}
-    </Page>
+    </Page></ConversationCacheContext.Provider>
   );
 }

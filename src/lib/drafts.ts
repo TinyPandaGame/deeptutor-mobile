@@ -6,6 +6,9 @@ export type QuestionDraft = {
   correct_answer?: string;
   user_answer?: string;
   session_id?: string;
+  turn_id?: string;
+  question_id?: string;
+  options?: Record<string, string>;
   images?: ChatAttachment[];
 };
 const photos = new WeakMap<TutorClient, Photo>();
@@ -33,3 +36,10 @@ export const questionDraft = {
     return value;
   },
 };
+
+export function clearConversationDrafts(api: TutorClient, ids: string[]) {
+  const deleted = new Set(ids);
+  if (deleted.has(questions.get(api)?.session_id || '')) questions.delete(api);
+  const source = chats.get(api)?.context.selection_tutor_context as { parent_session_id?: string } | undefined;
+  if (deleted.has(source?.parent_session_id || '')) chats.delete(api);
+}

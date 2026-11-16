@@ -4,7 +4,7 @@
 
 客户端只读取 `TinyPandaGame/deeptutor-mobile` 的 GitHub Releases。DeepTutor 官方更新先经过我们的适配与测试，再形成客户端发行版本；不会直接消费官方仓库、主分支提交或草稿。
 
-0.4.3 提供完整 Android APK，原生基础仍为包含 Expo Clipboard 的 0.4.1。本次没有 0.4.3 OTA 清单，旧版请进入“我的 → 应用更新”下载安装包。iOS 工程仍为 0.3.2。
+0.4.4 提供完整 Android APK，原生基础仍为包含 Expo Clipboard 的 0.4.1。本次没有 0.4.4 OTA 清单，旧版请进入“我的 → 应用更新”下载安装包。iOS 工程仍为 0.3.2。
 
 ## 使用方式
 
@@ -59,6 +59,10 @@ node --experimental-strip-types scripts/ota-release.mjs seal \
 将候选目录中 `ota-*.hbc` 和其他哈希资源与封装后的 `ota-android-RUNTIME.json` 附到同一个 Release；不要上传验收记录、未签名候选、配置文件或私钥。iOS 按相同过程单独导出、验收，不能沿用 Android 记录。本机替代分发接口的测试证明原生链路可用，但不能当作公开 GitHub 附件下载已验收。
 
 ## 当前验证状态
+
+### 0.4.4 Android 完整包
+
+APK 内置客户端版本为 0.4.4，原生基础保持 0.4.1（versionCode 7），实际运行时为 `2e94cfc54c5038f49c20a19f01da74551475bb4a`，与上一版及编译后重算结果一致。正式签名、内置代码、默认服务为空和更新证书检查通过。本轮只提供源码与完整 APK，未签发 OTA，iOS 与 TestFlight 不变；未进行设备安装、长按手势、系统菜单或 OTA 下载重启验收。
 
 ### 0.4.3 Android 完整包
 

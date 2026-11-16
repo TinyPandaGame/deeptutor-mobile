@@ -69,7 +69,7 @@ function SpeechDialog({ text, conversation, onClose }: { text: string; conversat
       setBusy(true); setSpoken(passage);
       const audio = await request?.generate(passage);
       if (!audio || !api || run !== epoch.current) return;
-      uri.current = temporaryBytes(api, audio.bytes, `speech.${audio.extension}`);
+      uri.current = temporaryBytes(api, audio.bytes, `speech.${audio.extension}`, conversation);
       player.replace({ uri: uri.current }); player.setPlaybackRate(currentRate.current); player.play(); setPrepared(true);
     } catch (e) { if (run === epoch.current) setError((e as Error).message); }
     finally { if (run === epoch.current) setBusy(false); }

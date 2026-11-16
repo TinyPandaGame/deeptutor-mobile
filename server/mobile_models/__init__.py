@@ -242,4 +242,6 @@ def install(app):
 
     install_runtime()
     app.include_router(router)
+    from .conversations import router as conversations_router
+    app.include_router(conversations_router)
     app.state.mobile_models_installed = True

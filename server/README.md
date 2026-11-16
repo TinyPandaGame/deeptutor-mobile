@@ -1,4 +1,4 @@
-# 个人模型接口（可选服务端扩展）
+# 手机端服务扩展（个人模型与对话清理）
 
 验证目标为 **DeepTutor 1.7.1 / 1.7.2**；未知版本仍拒绝加载。普通账号无需提升为管理员，即可填写自己的 API Key、发现模型、保存配置及选择对话模型。未安装扩展时，客户端仍能切换官方 `/api/settings/llm-options` 返回的模型，并明确提示个人配置接口未安装。
 
@@ -44,13 +44,28 @@ Docker 应使用只读代码挂载或自建镜像，保留既有数据卷和启�
 
 ## 验证
 
-在隔离环境安装 `deeptutor[server,providers,reading]==1.7.2`（或 1.7.1），以及 `httpx`、`python-multipart`。测试还需要 Node 24 执行客户端实际的配置生成函数。随后执行：
+在隔离环境安装 `deeptutor[server,providers,reading]==1.7.2`（或 1.7.1），以及同版本 `deeptutor-questions`、`httpx`、`python-multipart`。测试还需要 Node 24 执行客户端实际的配置生成函数。随后执行：
 
 ```bash
 python server/tests/test_mobile_models.py
 python server/tests/test_upstream_contracts.py
+python server/tests/test_conversations.py
+python server/tests/test_chat_study.py
 ```
 
 测试创建隔离临时 home，使用 HTTP TestClient，不启动本地 DeepTutor 学习后端，也不读真实学习资料或密钥。覆盖双账号权限隔离、脱敏、留空/替换、下一次运行时配置解析、模型发现、默认选择/删除和无登录拒绝。
 
 Android 交互模拟：`npm run mock -- --base-port 8896 --user-models`，演示账号 `demo` 或 `other`，密码 `demo-pass`。仅 `fixture-key` 开头的模拟 Key 返回成功；无外部请求、无真实模型。模拟结果不能代替实际 VPS 推理验收。
+
+
+## 保留错题的彻底删除（客户端 0.4.4）
+
+更新整个 `mobile_models` 包（包括 `conversations.py`），沿用已有 `install(app)` 入口；该增强仍只支持已经过契约测试的 DeepTutor 1.7.1 / 1.7.2 和本地磁盘附件存储。客户端升级并不自动部署服务器扩展。
+
+- GET `/api/mobile/conversations/capabilities`：确认版本化删除能力。
+- DELETE `/api/mobile/conversations/{session_id}`：在当前登录账号/工作区中取消活动任务，保留错题照片，然后在同一个 SQLite 事务中删除聊天及多级追问的真实消息/轮次记录。错题原 ID、分类关系、作答记录保留，关联会话置空。
+- POST `/api/mobile/conversations/cleanup`，正文 `{"session_ids":["…"]}`：重试已删除会话的附件清理。只有本扩展创建的清理凭据允许删除存在的目录；拒绝活动会话、路径穿越、符号链接及任意错题目录。不允许指定其他账号或工作区。
+
+原版删除会移除聊天附件目录，其中可能仍有错题照片。因此本扩展将错题照片复制到独立目录、核对字节并更新原错题的图片引用后再清理；不在网络上抓取外部照片 URL。删除结果单独返回 `cleanup_complete`，不会把上游吞掉的附件清理错误当作全部完成。手机端同时核对聊天详情已不存在，并清理当前身份的草稿与缓存。未安装增强的服务器明确阻止此项彻底删除，不静默退回可能丢失照片的旧行为。
+
+测试仅使用临时数据库和合成文件，验证物理记录/附件删除、保留错题照片、重试清理、跨身份拒绝、活动任务及磁盘失败。当前仓库修改不代表已部署到任何生产服务；设备手势、真实推理、生产数据迁移需另外验收。
