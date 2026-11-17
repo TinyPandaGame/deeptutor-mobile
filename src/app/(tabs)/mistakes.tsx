@@ -59,6 +59,13 @@ export default function Mistakes() {
             </Pressable>
           }
         />
+        <View style={{ marginBottom: 18 }}>
+          <Button
+            title="拍照 / 相册录入错题"
+            icon="camera-outline"
+            onPress={() => router.push("/question/new")}
+          />
+        </View>
         <View
           style={{
             flexDirection: "row",
@@ -80,11 +87,15 @@ export default function Mistakes() {
             style={{ flex: 1, padding: 14, color: C.ink, fontSize: 15 }}
           />
         </View>
-        <Chips value={filter} onChange={setFilter} items={[
-          { value: "all", label: "全部错题" },
-          { value: "todo", label: "待回顾" },
-          { value: "star", label: "重点收藏" },
-        ]} />
+        <Chips
+          value={filter}
+          onChange={setFilter}
+          items={[
+            { value: "all", label: "全部错题" },
+            { value: "todo", label: "待回顾" },
+            { value: "star", label: "重点收藏" },
+          ]}
+        />
         {q.error ? <Failure message={q.error} retry={q.reload} /> : null}
         {pending || (q.loading && !q.data) ? <Loading /> : null}
         {!pending && !q.loading && !q.error && !items.length ? (

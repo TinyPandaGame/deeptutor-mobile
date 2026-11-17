@@ -11,6 +11,7 @@
 | 账号登录 | `POST /api/auth/login`, JSON username/password；用户信息 + HttpOnly dt_token Cookie | 安全存储；原生使用 Bearer；内联内容画布不接收凭据 |
 | HTTP / WS 认证 | REST 使用 Bearer；WebSocket 握手使用 dt_token Cookie | 显式传递当前会话，禁用共享 Cookie；仅发送到当前服务 |
 | 聊天 | `/ws`, protocol_version=2.0、start_turn、content / result / done / seq | 流式回复、互动题卡、停止与恢复 |
+| 拍照录题 | 复用模型列表和 `/ws` 图片附件，随后 `/api/question-notebook/entries/upsert` | 提取→校对→确认保存；原图独立上传给错题记录。需要可用的图片输入模型，不是离线 OCR；不新增服务器接口 |
 | 学习数据 | `/api/sessions`、question-notebook、reading/materials、notebooks | 客户端页面通过同源 API 操作；错题使用服务端搜索与分页 |
 | 资料上传 | multipart file 到 `/api/reading/materials` | 格式由服务端支持列表决定，默认 PDF / DOCX / TXT；上限 25 MB，确认后上传 |
 | 原生模块 | reading、books、mastery-paths、notebooks、documents、partners、memory、calendar、workspace 等 API | 以迁移说明列出的实现与限制为准；不打开上游应用网页 |
