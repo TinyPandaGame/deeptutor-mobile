@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "../lib/auth";
 import { useResource } from "../lib/resources";
-import { Button, C, Heading, Page, Row, Section, s } from "../ui";
+import { Button, C, Field, Heading, Page, Row, Section, s } from "../ui";
 import {
   Actions,
   Editor,
+  FormModal,
   Prose,
   Refresh,
   ResourceState,
@@ -22,6 +23,8 @@ import { ModelPicker } from './model-picker';
 import { ReadAloud } from './read-aloud';
 import { masteryStart } from '../lib/mastery-start';
 import type { ModelSelection } from '../lib/models';
+import { loadPracticeSources, practiceSearch, practiceTopicSources, PRACTICE_SOURCE_LIMIT, type PracticeSource } from "../lib/mastery-practice";
+import { documentPreview } from "../lib/learning-records";
 type Topic = {
   path_id: string;
   name: string;
@@ -177,49 +180,136 @@ export function Mastery({ id = "" }: { id?: string }) {
             ask(api, task.text, context);
           });
         }} />}
-      {editor ? (
+      {editor === "create" ? <CreateMasteryTopic key={api?.scope} onClose={() => setEditor("")} /> : null}
+      {editor === "rename" ? (
         <Editor
-          title={editor === "create" ? "新建学习目标" : "修改目标名称"}
-          fields={
-            editor === "create"
-              ? [
-                  { key: "name", label: "目标名称", required: true },
-                  {
-                    key: "goal",
-                    label: "希望掌握什么，当前学到哪里",
-                    required: true,
-                    multiline: true,
-                  },
-                ]
-              : [
-                  {
-                    key: "name",
-                    label: "目标名称",
-                    value: t?.name,
-                    required: true,
-                  },
-                ]
-          }
+          title="修改目标名称"
+          fields={[{ key: "name", label: "目标名称", value: t?.name, required: true }]}
           onClose={() => setEditor("")}
           onSave={async (v) => {
             if (!api) return;
-            if (editor === "create") {
-              const created = await api.json<Topic>(
-                "/api/mastery-paths/topics",
-                v,
-              );
-              feature("mastery", created.path_id);
-            } else {
-              await api.json(
-                `/api/mastery-paths/progress/${enc(id)}`,
-                v,
-                "PATCH",
-              );
-              await r.reload();
-            }
+            await api.json(`/api/mastery-paths/progress/${enc(id)}`, v, "PATCH");
+            await r.reload();
           }}
         />
       ) : null}
     </Page>
   );
+}
+
+function CreateMasteryTopic({ onClose }: { onClose: () => void }) {
+  const { api } = useAuth();
+  const [name, setName] = useState("");
+  const [goal, setGoal] = useState("");
+  const [choosing, setChoosing] = useState(false);
+  const [selected, setSelected] = useState<PracticeSource[]>([]);
+  const action = useAction();
+  const close = () => { if (!action.busy) onClose(); };
+  const toggle = (source: PracticeSource) => {
+    if (action.busy) return;
+    setSelected(current => current.some(item => item.id === source.id)
+      ? current.filter(item => item.id !== source.id)
+      : current.length < PRACTICE_SOURCE_LIMIT ? [...current, source] : current);
+  };
+
+  return <FormModal onClose={close}><Page>
+    <Heading title="新建学习目标" right={<Button title="取消" compact secondary disabled={action.busy} onPress={close} />} />
+    <View style={{ gap: 14 }}>
+      <Field label="目标名称" value={name} onChangeText={setName} maxLength={120} editable={!action.busy} />
+      <Field label="希望掌握什么，当前学到哪里" value={goal} onChangeText={setGoal} maxLength={2000} multiline editable={!action.busy} />
+      <Button title={choosing ? "收起题库" : "从题库选题（可选）"} secondary disabled={action.busy} onPress={() => setChoosing(value => !value)} />
+      {selected.length ? <>
+        <Text style={s.muted}>已选择 {selected.length} / {PRACTICE_SOURCE_LIMIT} 道题</Text>
+        {selected.map(item => <Row key={item.id} title={documentPreview(item.question) || "题目"} suffix="移除" onPress={() => toggle(item)} />)}
+      </> : null}
+      {choosing ? <PracticeSourcePicker selected={selected} onToggle={toggle} /> : null}
+      {action.error ? <Text style={{ color: C.danger }}>{action.error}</Text> : null}
+      <Button title="保存" busy={action.busy} disabled={!name.trim() || !goal.trim()} onPress={() => {
+        void action.run(async () => {
+          if (!api) return;
+          const topic = await api.json<Topic>("/api/mastery-paths/topics", {
+            name: name.trim(),
+            goal: goal.trim(),
+            sources: practiceTopicSources(selected),
+          });
+          api.assertOpen();
+          onClose();
+          feature("mastery", topic.path_id);
+        });
+      }} />
+    </View>
+  </Page></FormModal>;
+}
+
+function PracticeSourcePicker({ selected, onToggle }: {
+  selected: PracticeSource[];
+  onToggle: (source: PracticeSource) => void;
+}) {
+  const { api } = useAuth();
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState({ search: "", page: 0 });
+  const [data, setData] = useState<Awaited<ReturnType<typeof loadPracticeSources>> | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
+  const legacy = useRef(false);
+  const term = practiceSearch(search);
+  const pending = term !== query.search;
+  const changePage = (page: number) => {
+    setLoading(true);
+    setData(null);
+    setError("");
+    setQuery(previous => ({ ...previous, page }));
+  };
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setData(null);
+      setError("");
+      setQuery({ search: term, page: 0 });
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [pending, term]);
+  useEffect(() => {
+    if (!api) return;
+    const controller = new AbortController();
+    void loadPracticeSources(api, query.search, query.page, controller.signal, legacy.current)
+      .then(result => {
+        if (controller.signal.aborted || api.isClosed) return;
+        legacy.current = result.useLegacy;
+        setData(result);
+      })
+      .catch((failure: Error) => {
+        if (!controller.signal.aborted && !api.isClosed) setError(failure.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted && !api.isClosed) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [api, query, retry]);
+
+  const visibleData = pending ? null : data;
+  const restart = () => { setError(""); setLoading(true); setRetry(count => count + 1); };
+  return <View style={[s.card, { gap: 8 }]}>
+    <Field label="搜索题目" value={search} onChangeText={setSearch} maxLength={200} />
+    <ResourceState resource={{ data: visibleData, loading: pending || loading, error: pending ? "" : error, reload: restart }} />
+    {visibleData && !error ? <>
+      {!visibleData.items.length ? <Text style={s.muted}>这一页没有可选择的题目。</Text> : null}
+      {visibleData.items.map(item => {
+        const checked = selected.some(source => source.id === item.id);
+        if (!checked && selected.length >= PRACTICE_SOURCE_LIMIT) {
+          return <Text key={item.id} numberOfLines={2} style={s.muted}>{documentPreview(item.question)}</Text>;
+        }
+        return <Row key={item.id} title={documentPreview(item.question) || "题目"} suffix={checked ? "已选" : "选择"} onPress={() => onToggle(item)} />;
+      })}
+      {query.page > 0 || visibleData.hasMore ? <>
+        <Text style={s.muted}>第 {query.page + 1} 页 · 共 {visibleData.total} 道题</Text>
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          <Button title="上一页" compact secondary disabled={query.page === 0 || loading} onPress={() => changePage(query.page - 1)} />
+          <Button title="下一页" compact secondary disabled={!visibleData.hasMore || loading} onPress={() => changePage(query.page + 1)} />
+        </View>
+      </> : null}
+    </> : null}
+  </View>;
 }

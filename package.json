@@ -1,6 +1,6 @@
 {
   "name": "deeptutor-mobile",
-  "version": "0.4.5",
+  "version": "0.4.7",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -64,5 +64,5 @@
   },
   "private": true,
   "license": "Apache-2.0",
-  "deeptutorCompatibility": "1.7.2"
+  "deeptutorCompatibility": "1.7.4"
 }

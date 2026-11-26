@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TutorClient } from '../src/lib/client.ts';
 import { connection } from '../src/lib/connection.ts';
-import { modelOptions, resolveTurnModel, loadModelOptions, providerEdit, discoveryModels, sourceFor, type Catalog, type ModelOptions } from '../src/lib/models.ts';
+import { modelOptions, resolveTurnModel, loadModelOptions, providerEdit, discoveryModels, selection, sourceFor, supportsTurnReasoning, type Catalog, type ModelOptions } from '../src/lib/models.ts';
 
 const data: ModelOptions = { active: { profile_id: 'profile-b', model_id: 'id-b' }, options: [
   { profile_id: 'profile-a', model_id: 'id-a', model: 'model-version-a', model_name: 'A', profile_name: 'Provider', provider: 'custom', is_active_default: false },
@@ -17,6 +17,42 @@ test('new turn uses real IDs; default explicitly overrides the old session choic
 test('model listing strips secrets and rejects malformed option rows', () => {
   assert.equal(JSON.stringify(modelOptions({ ...data, api_key: 'fixture-key' })).includes('fixture-key'), false);
   assert.throws(() => modelOptions({ options: [null] }), /不兼容/);
+});
+test('restored reasoning effort is sent only if the selected model still supports it', () => {
+  const choice = selection({ ...data.active, reasoning_effort: '  HIGH ' });
+  const current = modelOptions({
+    ...data,
+    options: [data.options[0], {
+      ...data.options[1], supported_reasoning_efforts: ['low', 'HIGH', 'high', 'adaptive'],
+    }],
+  });
+  assert.deepEqual(current.options[1].supported_reasoning_efforts, ['low', 'high']);
+  assert.deepEqual(resolveTurnModel(current, choice, true), { ...data.active, reasoning_effort: 'high' });
+  assert.deepEqual(resolveTurnModel(current, { ...choice!, reasoning_effort: 'xhigh' }, true), data.active);
+  assert.deepEqual(resolveTurnModel(current, null, true), data.active);
+  assert.deepEqual(resolveTurnModel(current, choice), data.active);
+  assert.deepEqual(resolveTurnModel(modelOptions({
+    ...data, options: [data.options[0], { ...data.options[1], declared_reasoning: false }],
+  }), choice, true), data.active);
+});
+test('turn reasoning requires a supported server version, scoped to the connection that reported it', async () => {
+  async function probe(version?: string) {
+    let calls = 0;
+    const api = new TutorClient(connection('http://10.0.2.2:8786', 'computer'), null, async url => {
+      assert.equal(new URL(String(url)).pathname, '/api/system/update');
+      calls++;
+      return new Response(JSON.stringify({ current_version: version }), { status: version ? 200 : 404 });
+    });
+    const first = supportsTurnReasoning(api);
+    const second = supportsTurnReasoning(api);
+    assert.strictEqual(first, second);
+    const result = await first;
+    assert.equal(calls, 1);
+    return result;
+  }
+  assert.equal(await probe('1.7.4'), true);
+  assert.equal(await probe('1.7.2'), false);
+  assert.equal(await probe(), false);
 });
 test('personal model endpoint falls back only on 404, never hides auth/server failures', async () => {
   for (const status of [404, 403, 503]) {

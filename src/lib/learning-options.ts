@@ -5,7 +5,7 @@ export type Capability = {
 };
 export type Persona = { name: string };
 export type KnowledgeBase = { name: string; id?: string };
-export type ChatOptions = { capability: string; persona: string; config: Record<string, unknown>; knowledge_bases: string[] };
+export type ChatOptions = { capability: string; persona: string; config: Record<string, unknown>; knowledge_bases?: string[] };
 
 // Context also holds mutable reading/tutor source anchors and model choices.
 // Keep those out of the options overlay so an old snapshot cannot undo an edit.

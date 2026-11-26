@@ -55,6 +55,7 @@ function Routes() {
           <Stack.Screen name="add-material" options={{ animation: "none" }} />
 
           <Stack.Screen name="history" />
+          <Stack.Screen name="ongoing" />
           <Stack.Screen name="modules" />
           <Stack.Screen name="module" />
           <Stack.Screen name="feature" />

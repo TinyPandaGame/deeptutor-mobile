@@ -1,6 +1,7 @@
 import { isPrivateHost, safePath, scopedKey, type Connection } from "./connection.ts";
 import { questionEntries } from "./question-entries.ts";
 import { learningOptionsResponse } from "./learning-options.ts";
+import type { SessionTurn } from "./active-turn.ts";
 export type User = { user_id: string; username: string; role: string };
 export type Credentials = { username: string; password: string };
 export type SavedLogin = Credentials & { origin: string; user: User; token: string; workspaceId?: string };
@@ -86,7 +87,7 @@ export class TutorClient {
       if (!r.ok) throw new ApiError(`无法检查服务认证设置（${r.status}）。`, r.status);
       const value = await r.json();
       if (typeof value.enabled !== "boolean" || typeof value.authenticated !== "boolean")
-        throw new ApiError("地址没有返回兼容的 DeepTutor 接口。请使用 1.7.1 或 1.7.2 的同源服务首页地址。");
+        throw new ApiError("地址没有返回兼容的 DeepTutor 接口。请填写 DeepTutor 服务首页地址，建议使用 1.7.4。");
       return value;
     }, 15000);
   }
@@ -238,7 +239,10 @@ export type Session = {
   content_workspace_id?: string;
   messages?: { id: string; role: string; content: string; events?: TurnEvent[]; attachments?: ChatAttachment[] }[];
   preferences?: Record<string, unknown>;
-  active_turn?: { id: string; status: string; last_seq: number };
+  status?: string;
+  active_turn_id?: string;
+  active_turns?: SessionTurn[];
+  active_turn?: SessionTurn | null;
 };
 export type ChatAttachment = { type: string; url?: string; base64?: string; filename?: string; mime_type?: string; id?: string };
 export type Material = {

@@ -89,6 +89,12 @@ export default function Home() {
           <Text style={s.muted}>拍下不会的题</Text>
         </Pressable>
       </View>
+      <Row
+        title="进行中"
+        detail="看进度，接着回答或停止"
+        icon="time-outline"
+        onPress={() => router.push("/ongoing")}
+      />
       <Section
         title="我的积累"
         action="全部功能"

@@ -6,6 +6,7 @@ import { isImageAttachment, outgoingAttachments } from "../../lib/chat-attachmen
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  AppState,
   Image,
   Keyboard,
   Pressable,
@@ -26,6 +27,7 @@ import {
   ChatAttachment,
   streamText,
 } from "../../lib/client";
+import { activeSessionTurn, messagesForTurnReplay, reachedReplayHead, type SessionTurn } from "../../lib/active-turn";
 import {
   PHOTO_QUESTION_PROMPT,
   photoQuestionDraft,
@@ -42,7 +44,6 @@ import { Button, C, Empty, Field, Heading, Icon, Page, s } from "../../ui";
 
 import {
   CapabilityOptions,
-  ChatOptions,
   defaultOptions,
   capabilityLabels,
   personaLabels,
@@ -61,9 +62,9 @@ import { GeneratedFile } from "../../features/generated-file";
 import { ChatThreads, ThreadSourceEditor } from "../../features/chat-threads";
 import { tutorSource, threadSource, visibleBranch, type SourceContext } from "../../lib/chat-actions";
 import { useComposerDraft } from "../../lib/use-composer-draft";
-import { mergeChatOptions } from "../../lib/learning-options";
+import { mergeChatOptions, type ChatOptions } from "../../lib/learning-options";
 import { ModelPicker } from "../../features/model-picker";
-import { loadModelOptions, resolveTurnModel, selection, selectedModel, type ModelSelection, type ModelOptions } from "../../lib/models";
+import { loadModelOptions, resolveTurnModel, selection, selectedModel, supportsTurnReasoning, type ModelSelection, type ModelOptions } from "../../lib/models";
 type Message = {
   id: string;
   role: string;
@@ -134,6 +135,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
   const [modelOpen, setModelOpen] = useState(false);
   const [modelChoice, setModelChoice] = useState<ModelSelection | null>(() => selection(initialDraft?.context.llm_selection));
   const [models, setModels] = useState<ModelOptions | null>(null);
+  const chatModel = selectedModel(models, modelChoice);
   useFocusEffect(useCallback(() => {
     let active = true;
     if (api) void loadModelOptions(api).then(value => { if (active) setModels(value); }).catch(() => { if (active) setModels(null); });
@@ -180,6 +182,15 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
   const socket = useRef<WebSocket | null>(null);
   const turn = useRef("");
   const sending = useRef(false);
+  const syncNeeded = useRef(id !== "new");
+  const initialSnapshot = useRef(id !== "new");
+  const syncInFlight = useRef(false);
+  const syncAbort = useRef<AbortController | null>(null);
+  const syncProgress = useRef<() => Promise<void>>(async () => {});
+  const lastSocketFrame = useRef(0);
+  const pingSentAt = useRef(0);
+  const terminalRevision = useRef(0);
+  const [reconnecting, setReconnecting] = useState(id !== "new");
   const waitingRef = useRef(false);
   const alive = useRef(true);
   const scroll = useRef<ScrollView>(null);
@@ -243,14 +254,16 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       socket.current?.readyState === WebSocket.OPEN
     ) {
       cancel.sent = true;
-      socket.current.send(
-        JSON.stringify({
+      try {
+        socket.current.send(JSON.stringify({
           type: "cancel_turn",
           protocol_version: "2.0",
           turn_id: cancel.turnId,
           command_id: `cancel_${Date.now()}`,
-        }),
-      );
+        }));
+      } catch {
+        requestProgressSync();
+      }
     }
   }
   async function chooseDocument() {
@@ -283,12 +296,19 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       setPicking(false);
     }
   }
-  async function send(override?: string, extra: Data = {}, resumeId = "") {
+  function requestProgressSync() {
+    if (!sid.current || !alive.current || api?.isClosed) return;
+    syncNeeded.current = true;
+    setReconnecting(true);
+  }
+  async function send(override?: string, extra: Data = {}, resume?: SessionTurn) {
     if (!api || deletion.isDeleting()) return;
+    const resumeId = resume?.id || "";
+    if (!resumeId && (syncNeeded.current || syncInFlight.current || reconnecting)) return;
     if (waitingRef.current && !resumeId) {
       if (replyPending.current) return;
       if (socket.current?.readyState !== WebSocket.OPEN) {
-        setError("连接已断开，请点恢复进度后继续作答。");
+        requestProgressSync();
         return;
       }
       const content = override || text.trim();
@@ -298,21 +318,24 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       if (!content && !entries.length) return;
       replyPending.current = true;
       setReplyBusy(true);
-      socket.current.send(
-        JSON.stringify({
+      try {
+        socket.current.send(JSON.stringify({
           protocol_version: "2.0",
           type: "submit_user_reply",
           turn_id: turn.current,
           command_id: `reply_${Date.now()}`,
           ...(content ? { text: content } : {}),
           ...(entries.length ? { answers: entries } : {}),
-        }),
-      );
-      setStatus("正在提交回答…");
+        }));
+        setStatus("正在提交回答…");
+      } catch {
+        requestProgressSync();
+      }
       return;
     }
     if (sending.current || (!resumeId && !(override || text).trim())) return;
     sending.current = true;
+    turn.current = resumeId;
     cancellation.current = { requested: false, sent: false, turnId: resumeId };
     setStopping(false);
     setBusy(true);
@@ -330,7 +353,8 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       // Validate/renew before opening WS; failed connections never silently re-submit a turn.
       await api.ensureSession();
       const currentModels = resumeId ? null : await loadModelOptions(api);
-      const turnModel = currentModels ? resolveTurnModel(currentModels, modelChoice) : undefined;
+      const allowReasoning = !!(currentModels && modelChoice?.reasoning_effort && await supportsTurnReasoning(api));
+      const turnModel = currentModels ? resolveTurnModel(currentModels, modelChoice, allowReasoning) : undefined;
       if (currentModels && alive.current) setModels(currentModels);
       const filePayload = attached
         ? {
@@ -347,7 +371,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       const ws = new NativeSocket(transport.url, null, {
         headers: transport.headers,
       });
-      api.onClose(() => ws.close());
+      const releaseSocket = api.onClose(() => ws.close());
       socket.current = ws;
       let terminal = false;
       let opened = false;
@@ -355,6 +379,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       let lastSeq = 0;
       let eventTrace: TurnEvent[] = [];
       let admitted = false;
+      let replaying = !!resumeId;
       const finish = (msg = "") => {
         if (!admitted && !resumeId) {
           resolveAdmission(false);
@@ -367,15 +392,26 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
         sending.current = false;
         setBusy(false);
         setStopping(false);
+        if (!syncNeeded.current) setReconnecting(false);
         setStatus("");
         if (msg) setError(msg);
       };
+      const disconnect = (msg: string) => {
+        if (terminal || !alive.current || api.isClosed || socket.current !== ws) return;
+        finish(sid.current ? "" : msg);
+        requestProgressSync();
+        if (ws.readyState < WebSocket.CLOSING) ws.close();
+      };
+      const sendPacket = (packet: Data) => {
+        try { ws.send(JSON.stringify(packet)); }
+        catch { disconnect("连接中断。请在「进行中」确认任务是否已经开始。"); }
+      };
       const timeout = setTimeout(() => {
         if (!opened) {
-          finish("连接超时，内容尚未提交，可以重试。");
-          ws.close();
+          disconnect("连接超时，内容尚未提交，可以重试。");
         }
       }, 20000);
+      let replayTimeout: ReturnType<typeof setTimeout> | undefined;
       ws.onopen = () => {
         clearTimeout(timeout);
         if (!alive.current || socket.current !== ws) {
@@ -383,6 +419,8 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
           return;
         }
         opened = true;
+        lastSocketFrame.current = Date.now();
+        pingSentAt.current = 0;
         if (cancellation.current.requested && !resumeId) {
           finish();
           ws.close();
@@ -391,18 +429,19 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
         if (resumeId) {
           turn.current = resumeId;
           setStatus("正在恢复进度…");
-          ws.send(
-            JSON.stringify({
-              type: "subscribe_turn",
-              protocol_version: "2.0",
-              turn_id: resumeId,
-              after_seq: 0,
-            }),
-          );
           setMessages((v) => [
             ...v,
             { id: reply, role: "assistant", content: "" },
           ]);
+          replayTimeout = setTimeout(() => {
+            if (replaying) disconnect("未能恢复学习进度。");
+          }, 20000);
+          sendPacket({
+            type: "subscribe_turn",
+            protocol_version: "2.0",
+            turn_id: resumeId,
+            after_seq: 0,
+          });
           return;
         }
         setStatus("DeepTutor 正在思考…");
@@ -420,35 +459,35 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
           },
           { id: reply, role: "assistant", content: "" },
         ]);
-        ws.send(
-          JSON.stringify({
-            protocol_version: "2.0",
-            type: "start_turn",
-            content: prompt,
-            ...context,
-            ...options,
-            ...extra,
-            llm_selection: turnModel,
-            ...(api.workspaceId ? { workspace_id: api.workspaceId } : {}),
-            client_submission_id: submission,
-            ...(sid.current ? { session_id: sid.current } : {}),
-            reply_language_override: "zh",
-            question_notebook_references: questionId
-              ? [Number(questionId)]
-              : [],
-            attachments: outgoingAttachments(image, filePayload, Array.isArray(extra.attachments) ? extra.attachments as ChatAttachment[] : []),
-          }),
-        );
+        sendPacket({
+          protocol_version: "2.0",
+          type: "start_turn",
+          content: prompt,
+          ...context,
+          ...options,
+          ...extra,
+          llm_selection: turnModel,
+          ...(api.workspaceId ? { workspace_id: api.workspaceId } : {}),
+          client_submission_id: submission,
+          ...(sid.current ? { session_id: sid.current } : {}),
+          reply_language_override: "zh",
+          question_notebook_references: questionId ? [Number(questionId)] : [],
+          attachments: outgoingAttachments(image, filePayload, Array.isArray(extra.attachments) ? extra.attachments as ChatAttachment[] : []),
+        });
       };
       ws.onmessage = (ev) => {
         if (!alive.current || socket.current !== ws) return;
+        lastSocketFrame.current = Date.now();
+        pingSentAt.current = 0;
         let event: TurnEvent;
         try {
           event = JSON.parse(String(ev.data));
         } catch {
           finish("服务返回了无法识别的内容，请恢复进度后重试。");
+          ws.close();
           return;
         }
+        if (event.type === "pong") return;
         if (event.type === "command_ack") {
           replyPending.current = false;
           setReplyBusy(false);
@@ -489,6 +528,11 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
         }
         if (event.seq && event.seq <= lastSeq) return;
         if (event.seq) lastSeq = event.seq;
+        if (replaying && resume && reachedReplayHead(resume, event, lastSeq)) {
+          replaying = false;
+          clearTimeout(replayTimeout);
+          if (!syncNeeded.current) setReconnecting(false);
+        }
         if (event.session_id) {
           // Admission is now confirmed. A failed connection before this point
           // keeps both text and attachments available for review and retry.
@@ -501,8 +545,8 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               void draft.clear().catch(e => setNotice(`已提交，但草稿清理失败：${e.message}`));
             }
           }
-          if (photo?.uri) assignConversationFile(api, photo.uri, event.session_id);
-          if (document?.uri) assignConversationFile(api, document.uri, event.session_id);
+          if (image?.uri) assignConversationFile(api, image.uri, event.session_id);
+          if (attached?.uri) assignConversationFile(api, attached.uri, event.session_id);
           sid.current = event.session_id;
           setSessionId(event.session_id);
         }
@@ -537,6 +581,10 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
           setWaitingCard(null);
           setWaiting(false);
           waitingRef.current = false;
+          if (!replaying) {
+            setAnswers({});
+            setAnswerOpen(false);
+          }
         }
 
         if (
@@ -567,47 +615,46 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
             setWaiting(false);
             waitingRef.current = false;
             setWaitingCard(null);
-          } else
+          } else {
             finish(event.content || "这次讲解未完成，请查看学习进度后重试。");
+            if (meta.error_code === "start_turn_rejected") requestProgressSync();
+          }
         }
         if (event.type === "done") {
+          terminalRevision.current++;
           finish();
+          if (waitingRef.current) setAnswerOpen(false);
           setWaiting(false);
           waitingRef.current = false;
           setWaitingCard(null);
           ws.close();
-          if (sid.current)
-            void api
-              .request<Session>(
-                `/api/sessions/${encodeURIComponent(sid.current)}`,
-              )
-              .then((r) => {
-                if (alive.current) {
-                  setMessages(r.messages || []);
-                  setTitle(r.title || title);
-                  setBranches(object(r.preferences?.selected_branches) as Record<string, number>);
-                }
-              })
-              .catch(() => {});
+          requestProgressSync();
+          void syncProgress.current();
         }
       };
       ws.onerror = () => {
         clearTimeout(timeout);
-        if (terminal || api.isClosed) return;
-        finish(
+        disconnect(
           opened
-            ? "连接中断，请恢复进度确认已保存的结果，避免重复提交。"
+            ? "连接中断。请在「进行中」确认任务是否已经开始。"
             : "连接未建立，内容尚未提交，请重试。",
         );
       };
       ws.onclose = () => {
+        releaseSocket();
         clearTimeout(timeout);
-        if (!terminal) finish("连接已断开，请恢复进度查看已保存的结果。");
+        clearTimeout(replayTimeout);
+        if (!terminal) disconnect("连接已断开。请在「进行中」确认任务是否已经开始。");
       };
       return resumeId ? true : await admission;
     } catch (e) {
-      if (alive.current) {
-        setError((e as Error).message);
+      if (alive.current && !api.isClosed) {
+        if (resumeId && (!(e instanceof ApiError) || ![401, 403, 404].includes(e.status || 0))) {
+          requestProgressSync();
+        } else {
+          setReconnecting(false);
+          setError((e as Error).message);
+        }
         sending.current = false;
         setBusy(false);
         setStopping(false);
@@ -619,92 +666,150 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
   useEffect(() => {
     alive.current = true;
     if (api) photoDraft.take(api);
-    if (api && id !== "new")
-      void api
-        .request<Session>(`/api/sessions/${encodeURIComponent(id)}`)
-        .then((r) => {
-          if (alive.current) {
-            setMessages(r.messages || []);
-            setTitle(r.title || "学习对话");
-            const prefs = r.preferences || {};
-            setBranches(object(prefs.selected_branches) as Record<string, number>);
-            setModelChoice(selection(prefs.llm_selection));
-            setOptions((o) => ({
-              ...o,
-              ...(typeof prefs.capability === "string"
-                ? { capability: prefs.capability }
-                : {}),
-              ...(typeof prefs.persona === "string"
-                ? { persona: prefs.persona }
-                : {}),
-              ...(prefs.config ? { config: object(prefs.config) } : {}),
-              ...(Array.isArray(prefs.knowledge_bases)
-                ? { knowledge_bases: prefs.knowledge_bases as string[] }
-                : {}),
-            }));
-            const allowed = [
-              "reading_material_id",
-              "reading_material_revision",
-              "reading_workspace_id",
-              "reading_viewport",
-              "workspace_mode",
-              "mastery_path_id",
-              "mastery_session_mode",
-              "note_document_id",
-              "knowledge_bases",
-              "book_references",
-              "notebook_references",
-            ];
-            setContext(
-              { ...Object.fromEntries(
-                allowed
-                  .filter((k) => prefs[k] !== undefined)
-                  .map((k) => [k, prefs[k]]),
-              ), ...(tutorSource(prefs) ? { selection_tutor_context: tutorSource(prefs) } : {}) },
-            );
-            if (
-              r.active_turn &&
-              ["queued", "running", "waiting_input", "recovering"].includes(
-                r.active_turn.status,
-              )
-            ) {
-              void send(undefined, {}, r.active_turn.id);
-            }
-          }
-        })
-        .catch((e) => {
-          if (alive.current) setError(e.message);
-        });
     return () => {
       alive.current = false;
+      syncAbort.current?.abort();
       socket.current?.close();
       socket.current = null;
     };
-    // The transport is initialized once per authenticated client and route. Its
-    // mutable socket/turn refs own recovery; composer edits must not reconnect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, id]);
+
+  // Use the latest composer state only for foreground actions. The focus
+  // subscription should not restart when an answer or draft changes.
+  useEffect(() => { syncProgress.current = restoreProgress; });
+  useFocusEffect(useCallback(() => {
+    if (!api) return;
+    const tick = () => {
+      if (AppState.currentState === "background" || AppState.currentState === "inactive") return;
+      if (syncNeeded.current) {
+        void syncProgress.current();
+        return;
+      }
+      const ws = socket.current;
+      if (!sending.current || !turn.current || ws?.readyState !== WebSocket.OPEN) return;
+      const now = Date.now();
+      if (pingSentAt.current) {
+        if (now - pingSentAt.current >= 10000) {
+          syncNeeded.current = true;
+          setReconnecting(true);
+          ws.close();
+          void syncProgress.current();
+        }
+      } else if (now - lastSocketFrame.current >= 10000) {
+        pingSentAt.current = now;
+        try { ws.send(JSON.stringify({ type: "ping", protocol_version: "2.0" })); }
+        catch { ws.close(); }
+      }
+    };
+    const refresh = () => {
+      if (!sid.current || !alive.current || api.isClosed) return;
+      syncNeeded.current = true;
+      setReconnecting(true);
+      tick();
+    };
+    refresh();
+    const timer = setInterval(tick, 3500);
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active") refresh();
+      else syncAbort.current?.abort();
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+      syncAbort.current?.abort();
+    };
+  }, [api]));
+
+  function applyInitialPreferences(prefs: Record<string, unknown>) {
+    setModelChoice(selection(prefs.llm_selection));
+    setOptions(old => ({
+      ...old,
+      ...(typeof prefs.capability === "string" ? { capability: prefs.capability } : {}),
+      ...(typeof prefs.persona === "string" ? { persona: prefs.persona } : {}),
+      ...(prefs.config ? { config: object(prefs.config) } : {}),
+      ...(Array.isArray(prefs.knowledge_bases) ? { knowledge_bases: prefs.knowledge_bases as string[] } : {}),
+    }));
+    const contextKeys = [
+      "reading_material_id", "reading_material_revision", "reading_workspace_id",
+      "reading_viewport", "workspace_mode", "mastery_path_id", "mastery_session_mode",
+      "note_document_id", "knowledge_bases", "book_references", "notebook_references",
+    ];
+    const source = tutorSource(prefs);
+    setContext({
+      ...Object.fromEntries(contextKeys.filter(k => prefs[k] !== undefined).map(k => [k, prefs[k]])),
+      ...(source ? { selection_tutor_context: source } : {}),
+    });
+  }
   async function restoreProgress() {
-    if (!api || !sid.current) return;
+    if (!api || api.isClosed || !alive.current || !sid.current || deletion.isDeleting() ||
+        syncInFlight.current || (sending.current && !turn.current)) return;
+    const controller = new AbortController();
+    syncAbort.current = controller;
+    syncInFlight.current = true;
+    const observedSocket = socket.current;
+    const currentSession = sid.current;
+    const revision = terminalRevision.current;
+    const wasRunning = sending.current;
+    const path = `/api/sessions/${encodeURIComponent(currentSession)}`;
+    const readSession = () => api.request<Session>(path, { signal: controller.signal }, true, 8000);
     try {
-      const r = await api.request<Session>(
-        `/api/sessions/${encodeURIComponent(sid.current)}`,
-      );
-      setMessages(r.messages || []);
+      let r = await readSession();
+      let active = activeSessionTurn(r);
+      // The server reads messages before active turns. If the turn just
+      // ended between those reads, repeat once to fetch the saved answer.
+      if (!active && (wasRunning || r.active_turn_id) &&
+          !controller.signal.aborted && revision === terminalRevision.current) {
+        r = await readSession();
+        active = activeSessionTurn(r);
+      }
+      if (controller.signal.aborted || !alive.current || api.isClosed ||
+          socket.current !== observedSocket || sid.current !== currentSession ||
+          terminalRevision.current !== revision) return;
+      // Rebuild the in-flight answer from the event log. Keep completed
+      // messages and the original user prompt from the server snapshot.
+      setMessages(messagesForTurnReplay(r.messages || [], active));
       setError("");
       setTitle(r.title || "学习对话");
+      const prefs = r.preferences || {};
+      setBranches(object(prefs.selected_branches) as Record<string, number>);
+      if (initialSnapshot.current) {
+        initialSnapshot.current = false;
+        applyInitialPreferences(prefs);
+      }
+      socket.current = null;
+      observedSocket?.close();
+      syncNeeded.current = false;
       sending.current = false;
       setBusy(false);
-      socket.current?.close();
-      if (
-        r.active_turn &&
-        ["queued", "running", "waiting_input", "recovering"].includes(
-          r.active_turn.status,
-        )
-      )
-        await send(undefined, {}, r.active_turn.id);
+      replyPending.current = false;
+      setReplyBusy(false);
+      setStopping(false);
+      const wasWaiting = waitingRef.current;
+      waitingRef.current = false;
+      setWaiting(false);
+      setWaitingCard(null);
+      if (active) {
+        setReconnecting(true);
+        await send(undefined, {}, active);
+      } else {
+        turn.current = "";
+        setStatus("");
+        setReconnecting(false);
+        if (wasWaiting) setAnswerOpen(false);
+      }
     } catch (e) {
-      setError((e as Error).message);
+      if (!controller.signal.aborted && alive.current && !api.isClosed) {
+        if (e instanceof ApiError && [401, 403, 404].includes(e.status || 0)) {
+          syncNeeded.current = false;
+          setReconnecting(false);
+          setError(e.message);
+        } else {
+          requestProgressSync();
+        }
+      }
+    } finally {
+      if (syncAbort.current === controller) syncAbort.current = null;
+      syncInFlight.current = false;
     }
   }
   function saveQuestion(messageId?: string) {
@@ -1005,7 +1110,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
             <Button
               title="恢复学习进度"
               secondary
-              onPress={() => void restoreProgress()}
+              onPress={() => { requestProgressSync(); void restoreProgress(); }}
             />
           ) : null}
         </ScrollView>
@@ -1019,7 +1124,8 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
             backgroundColor: C.white,
           }}
         >
-          {modelOpen && <ModelPicker value={modelChoice} onChange={setModelChoice} onClose={() => setModelOpen(false)} />}
+          {modelOpen && <ModelPicker value={modelChoice} allowReasoning
+            onChange={value => { draft.edited(); setModelChoice(value); }} onClose={() => setModelOpen(false)} />}
           {document ? (
             <View
               style={{
@@ -1059,7 +1165,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               </Pressable>
             </View>
           )}
-          {busy && (
+          {(busy || reconnecting) && (
             <View
               style={{
                 flexDirection: "row",
@@ -1068,20 +1174,20 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               }}
             >
               <Text style={[s.muted, { flex: 1 }]}>
-                {stopping ? "正在停止，请稍候…" : status}
+                {reconnecting ? "正在恢复学习进度…" : stopping ? "正在停止，请稍候…" : status}
               </Text>
-              <SmallAction title={stopping ? "停止中" : "停止"} icon="stop-circle-outline" disabled={stopping} onPress={stopTurn} />
+              {busy && <SmallAction title={stopping ? "停止中" : "停止"} icon="stop-circle-outline" disabled={stopping || reconnecting} onPress={stopTurn} />}
             </View>
           )}
           <ChatComposer
             text={text}
             onChangeText={value => { draft.edited(); setText(value); }}
             editable={draft.ready && !deletion.deleting && !judging && !replyBusy && (!busy || waiting)}
-            sendDisabled={!draft.ready || !!deletion.deleting || judging || replyBusy || (busy && !waiting) || !text.trim()}
-            toolsDisabled={!draft.ready || !!deletion.deleting || (busy && !waiting) || picking || judging}
+            sendDisabled={!draft.ready || !!deletion.deleting || reconnecting || judging || replyBusy || (busy && !waiting) || !text.trim()}
+            toolsDisabled={!draft.ready || !!deletion.deleting || reconnecting || (busy && !waiting) || picking || judging}
             keyboardVisible={keyboardVisible}
             onSend={() => void send()}
-            modelLabel={selectedModel(models, modelChoice)?.model || (modelChoice ? "已选模型，请检查是否可用" : "服务默认")}
+            modelLabel={chatModel?.model || (modelChoice ? "已选模型，请检查是否可用" : "服务默认")}
             tools={[
               { key: "answer", title: "提交答案", icon: "checkmark-circle-outline", disabled: !waitingCard && !questions.length, onPress: () => setAnswerOpen(true) },
               { key: "mistake", title: "收进错题本", icon: "bookmark-outline", disabled: !messages.length, onPress: () => setRecordOpen(true) },
@@ -1150,6 +1256,7 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
               <Button
                 title="提交答案"
                 busy={replyBusy}
+                disabled={reconnecting || replyBusy}
                 onPress={() => void send()}
               />
             </View>
@@ -1202,7 +1309,8 @@ function Chat({ id, questionId }: { id: string; questionId?: string }) {
       {optionsOpen ? (
         <CapabilityOptions
           value={options}
-          onChange={setOptions}
+          allowWorkspaceDefault={!sessionId}
+          onChange={value => { draft.edited(); setOptions(value); }}
           onClose={() => setOptionsOpen(false)}
         />
       ) : null}

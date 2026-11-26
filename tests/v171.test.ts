@@ -8,6 +8,15 @@ import { connection, scopedKey } from "../src/lib/connection.ts";
 import type { Session } from "../src/lib/client.ts";
 import { mergeChatOptions } from "../src/lib/learning-options.ts";
 
+test("workspace knowledge inheritance omits the field, while a deliberate empty selection is written", () => {
+  const defaults = { capability: "chat", persona: "teacher", config: {} };
+  const inherited = mergeChatOptions(defaults, {});
+  assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(inherited)), "knowledge_bases"), false);
+  const disabled = mergeChatOptions(defaults, { knowledge_bases: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(disabled)).knowledge_bases, []);
+  assert.deepEqual(mergeChatOptions(defaults, { knowledge_bases: ["教材"] }).knowledge_bases, ["教材"]);
+});
+
 test("restored options cannot overwrite a changed tutor anchor or current model", () => {
   const oldSource = { parent_session_id: "parent", source_message_id: 2, quoted_message_id: 2 };
   const freshSource = { ...oldSource, quoted_message_id: 1 };

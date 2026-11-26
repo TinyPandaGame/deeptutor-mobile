@@ -23,6 +23,8 @@ import { Pdf } from "./pdf";
 import { ExportFile } from "./export";
 import { Content } from "./content";
 import { materialText } from "../lib/learning-records";
+import { readingQuizSupport } from "../lib/reading-quiz";
+import { ReadingQuiz } from "./reading-quiz";
 type Material = {
   material_id: string;
   title: string;
@@ -59,7 +61,8 @@ export function Reading({
   id?: string;
   material?: string;
 }) {
-  if (material) return <Reader key={material} id={material} workspace={id} />;
+  const { api } = useAuth();
+  if (material) return <Reader key={JSON.stringify([api?.scope, id, material])} id={material} workspace={id} />;
   if (id) return <Collection key={id} id={id} />;
   return <Library />;
 }
@@ -511,6 +514,8 @@ function Reader({ id, workspace }: { id: string; workspace: string }) {
     Annotation | "new" | "bookmark" | "jump" | null
   >(null);
   const unit = useResource<{ text: string }>(path + `/units/${page}`);
+  const extensions = useResource<Parameters<typeof readingQuizSupport>[0]>("/api/reading/extensions");
+  const quiz = readingQuizSupport(extensions.data);
   const notes = useResource<Annotation[]>(path + "/annotations");
   const marks = useResource<{ bookmarks: Bookmark[] }>(path + "/bookmarks");
   const action = useAction();
@@ -586,6 +591,7 @@ function Reader({ id, workspace }: { id: string; workspace: string }) {
           <Chips
             items={[
               { value: "read", label: "阅读" },
+              ...(quiz.quiz ? [{ value: "quiz", label: "测一测" }] : []),
               { value: "notes", label: `批注 ${notes.data?.length || 0}` },
               {
                 value: "marks",
@@ -631,7 +637,7 @@ function Reader({ id, workspace }: { id: string; workspace: string }) {
                 />
               ) : null}
               {m.render_mode === "pdf" && mode === "page" ? (
-                <Pdf materialId={id} page={page} />
+                <Pdf materialId={id} page={page} expandable />
               ) : (
                 <View style={s.card}>
                   <ResourceState resource={unit} />
@@ -715,7 +721,7 @@ function Reader({ id, workspace }: { id: string; workspace: string }) {
                 </View>
               ))}
             </>
-          ) : (
+          ) : panel === "marks" ? (
             <>
               <Actions>
                 <Button
@@ -751,7 +757,14 @@ function Reader({ id, workspace }: { id: string; workspace: string }) {
                 </View>
               ))}
             </>
-          )}
+          ) : null}
+          {quiz.quiz ? (
+            <View style={{ display: panel === "quiz" ? "flex" : "none" }}>
+              {!unit.data ? <ResourceState resource={unit} /> :
+                <ReadingQuiz key={`${m.revision}:${page}`} materialId={id} locator={page}
+                  unitText={unit.data?.text || ""} guidance={quiz.guidance} />}
+            </View>
+          ) : panel === "quiz" ? <Button title="返回本页阅读" secondary onPress={() => setPanel("read")} /> : null}
           {action.error ? (
             <Text style={{ color: C.danger }}>{action.error}</Text>
           ) : null}

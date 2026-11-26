@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ExportFile } from "./export";
 import { Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../lib/auth";
 import { useResource, useJobPolling } from "../lib/resources";
 import { Button, C, Heading, Page, Row, Section, s } from "../ui";
@@ -20,6 +20,8 @@ import {
   useAction,
 } from "./common";
 import { Content, Data, string, array, object } from "./content";
+import { BookEdits } from "./book-edits";
+import { bookEditsPath, canGenerateOpenedBookPage, type BookEditProposal } from "../lib/book-edits";
 const blockNames: Record<string, string> = {
   text: "正文",
   callout: "重点提示",
@@ -55,6 +57,9 @@ type BookPage = {
   status: string;
   learning_objectives: string[];
   blocks: Block[];
+  chapter_id?: string;
+  content_type?: string;
+  parent_page_id?: string;
 };
 type Book = {
   id: string;
@@ -66,6 +71,7 @@ type Book = {
   can_edit?: boolean;
   can_delete?: boolean;
   page_count: number;
+  metadata?: { page_chat_sessions?: Record<string, string> };
 };
 const statuses: Record<string, string> = {
   draft: "方案待确认",
@@ -90,7 +96,7 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
     pages: BookPage[];
     generation: Data;
     progress: Data;
-  }>(id ? `/api/books/${enc(id)}` : null);
+  }>(id ? `/api/books/${enc(id)}?include_blocks=false` : null);
   const p = useResource<{ page: BookPage }>(
     id && page ? `/api/books/${enc(id)}/pages/${enc(page)}` : null,
   );
@@ -108,6 +114,13 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
   const action = useAction();
   const b = r.data?.book;
   const current = p.data?.page;
+  const edits = useResource<{ edits: BookEditProposal[] }>(
+    b?.can_edit && r.data?.spine && !["draft", "spine_ready"].includes(b.status)
+      ? bookEditsPath(id, page || undefined)
+      : null,
+  );
+  const editsAvailable = Array.isArray(edits.data?.edits);
+  const autoRequested = useRef(new Set<string>());
   useJobPolling(
     r.reload,
     !!b && ["compiling", "planning", "generating"].includes(b.status),
@@ -131,8 +144,17 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
       chapters: chapters.map((x, i) => ({ ...object(x), order: i })),
     });
   }
-  async function call(operation: string, body: Data = {}) {
-    if (!api || !b) return;
+  const { reload: reloadBook } = r;
+  const { reload: reloadPage } = p;
+  const { reload: reloadEdits } = edits;
+  const revision = b?.revision;
+  const onBookChanged = useCallback(async () => {
+    const reads = [reloadBook(), reloadEdits()];
+    if (page) reads.push(reloadPage());
+    await Promise.all(reads);
+  }, [reloadBook, reloadPage, reloadEdits, page]);
+  const call = useCallback(async (operation: string, body: Data = {}) => {
+    if (!api || !revision) return;
     await api.request(
       `/api/books/${operation}`,
       {
@@ -140,16 +162,51 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           book_id: id,
-          expected_revision: b.revision,
+          expected_revision: revision,
           ...body,
         }),
       },
       true,
       180000,
     );
-    await r.reload();
-    if (page) await p.reload();
-  }
+    if (!api.isClosed) await onBookChanged();
+  }, [api, id, revision, onBookChanged]);
+  const bookStatus = b?.status || "";
+  const mayAutoGenerate = editsAvailable && !!current &&
+    canGenerateOpenedBookPage(bookStatus, b?.can_edit === true, current);
+  useFocusEffect(
+    useCallback(() => {
+      if (!api || api.isClosed || !id || !page || !revision || !mayAutoGenerate || action.busy) return;
+      const key = JSON.stringify([api.scope, id, page]);
+      if (autoRequested.current.has(key)) return;
+      autoRequested.current.add(key);
+      // Opening a pending page starts generation once. The server coalesces
+      // this request with a background job, and retry remains explicit.
+      void action.run(() => call("compile-page", { page_id: page, force: false }));
+    }, [api, id, page, revision, mayAutoGenerate, action, call]),
+  );
+  const bookEdits = api && b?.can_edit && editsAvailable ? (
+    <BookEdits
+      key={JSON.stringify([api.scope, id, page])}
+      api={api}
+      bookId={id}
+      revision={b.revision}
+      allowStructure={!page}
+      locked={b.status === "compiling" || (r.data?.pages.some(pg => ["planning", "generating"].includes(pg.status)) ?? false)}
+      chapters={array(r.data?.spine?.chapters).map(item => {
+        const chapter = object(item);
+        return {
+          id: string(chapter.id),
+          title: string(chapter.title),
+          pageIds: array(chapter.page_ids).map(string),
+          contentType: string(chapter.content_type),
+        };
+      })}
+      pages={r.data?.pages || []}
+      edits={edits.data?.edits || []}
+      onChanged={onBookChanged}
+    />
+  ) : null;
   return (
     <Page>
       <Heading
@@ -158,8 +215,7 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
         right={
           <Refresh
             onPress={() => {
-              void (id ? r.reload() : list.reload());
-              if (page) void p.reload();
+              void (id ? onBookChanged() : list.reload());
             }}
           />
         }
@@ -314,6 +370,7 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
                   ) : null}
                 </>
               ) : null}
+              {bookEdits}
               <Section title="章节与内容" />
               {r.data?.pages.map((pg) => (
                 <Row
@@ -348,6 +405,19 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
                     })
                   }
                 />
+                {b.metadata?.page_chat_sessions?.[page] ? (
+                  <Button title="继续本节对话" secondary onPress={() => router.push({
+                    pathname: "/chat/[id]",
+                    params: { id: b.metadata?.page_chat_sessions?.[page] || "" },
+                  })} />
+                ) : null}
+                {editsAvailable && current && b.can_edit ? (
+                  <Button title="请 AI 提议补充这一节" secondary onPress={() => {
+                    if (api) ask(api, "请为这一节提出一条补充建议，生成修改预览，等我确认后再应用。", {
+                      book_references: [{ book_id: id, page_ids: [page] }],
+                    });
+                  }} />
+                ) : null}
                 <Button
                   title="收藏 / 取消收藏"
                   secondary
@@ -359,6 +429,7 @@ export function Books({ id = "", page = "" }: { id?: string; page?: string }) {
                   }
                 />
               </Actions>
+              {bookEdits}
               {current?.blocks.map((block) => (
                 <View
                   key={block.id}

@@ -3,13 +3,8 @@ import { Text, View } from "react-native";
 import { useResource } from "../lib/resources";
 import { useAuth } from "../lib/auth";
 import { useComposerDraft } from "../lib/use-composer-draft";
-import { mergeChatOptions } from "../lib/learning-options";
+import { mergeChatOptions, type Capability, type ChatOptions, type KnowledgeBase, type Persona } from "../lib/learning-options";
 import { explanationPresets } from "../lib/study-presets";
-import type {
-  Capability,
-  KnowledgeBase,
-  Persona,
-} from "../lib/learning-options";
 import { Button, Field, Heading, Page, Row, Section, s } from "../ui";
 import {
   Actions,
@@ -38,12 +33,6 @@ export const personaLabels: Record<string, string> = {
   peer: "学习搭子",
   "research-assistant": "研究助手",
 };
-export type ChatOptions = {
-  capability: string;
-  persona: string;
-  config: Record<string, unknown>;
-  knowledge_bases: string[];
-};
 const defaults: Record<string, Record<string, unknown>> = {
   deep_research: { mode: "report", depth: "standard" },
   deep_question: {
@@ -60,7 +49,6 @@ export const defaultOptions = (capability = "chat"): ChatOptions => ({
   capability,
   persona: "teacher",
   config: { ...defaults[capability] },
-  knowledge_bases: [],
 });
 function NoOptions({ message, retry }: { message: string; retry: () => void }) {
   return (
@@ -74,10 +62,12 @@ export function CapabilityOptions({
   value,
   onChange,
   onClose,
+  allowWorkspaceDefault = true,
 }: {
   value: ChatOptions;
   onChange: (o: ChatOptions) => void;
   onClose: () => void;
+  allowWorkspaceDefault?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
   const r = useResource<{ capabilities: Capability[] }>(
@@ -289,6 +279,13 @@ export function CapabilityOptions({
         ) : null}
         <Section title="参考知识库" />
         <Text style={s.muted}>可选择多份教材作为提问依据。</Text>
+        {allowWorkspaceDefault || draft.knowledge_bases === undefined ? (
+          <Row title="跟随工作区" detail="由学习服务为此对话选择可用资料"
+            suffix={draft.knowledge_bases === undefined ? "已选" : "选择"}
+            onPress={() => setDraft(d => ({ ...d, knowledge_bases: undefined }))} />
+        ) : null}
+        <Row title="不参考知识库" suffix={draft.knowledge_bases?.length === 0 ? "已选" : "选择"}
+          onPress={() => setDraft(d => ({ ...d, knowledge_bases: [] }))} />
         <ResourceState resource={kb} />
         {!kb.loading && !kb.error && !kb.data?.length ? (
           <Text style={[s.muted, { marginVertical: 12 }]}>
@@ -300,15 +297,16 @@ export function CapabilityOptions({
             key={k.id || k.name}
             title={k.name}
             suffix={
-              draft.knowledge_bases.includes(k.id || k.name) ? "已选" : "选择"
+              draft.knowledge_bases?.includes(k.id || k.name) ? "已选" : "选择"
             }
             onPress={() =>
-              setDraft((d) => ({
-                ...d,
-                knowledge_bases: d.knowledge_bases.includes(k.id || k.name)
-                  ? d.knowledge_bases.filter((x) => x !== (k.id || k.name))
-                  : [...d.knowledge_bases, k.id || k.name],
-              }))
+              setDraft((d) => {
+                const selected = d.knowledge_bases || [];
+                const id = k.id || k.name;
+                return { ...d, knowledge_bases: selected.includes(id)
+                  ? selected.filter(x => x !== id)
+                  : [...selected, id] };
+              })
             }
           />
         ))}

@@ -4,7 +4,7 @@
 
 客户端只读取 `TinyPandaGame/deeptutor-mobile` 的 GitHub Releases。DeepTutor 官方更新先经过我们的适配与测试，再形成客户端发行版本；不会直接消费官方仓库、主分支提交或草稿。
 
-0.4.5 提供完整 Android APK，原生基础仍为包含 Expo Clipboard 的 0.4.1。本次没有 0.4.5 OTA 清单，旧版请进入“我的 → 应用更新”下载安装包。iOS 工程仍为 0.3.2。
+0.4.7 提供完整 Android APK，原生基础仍为包含 Expo Clipboard 的 0.4.1。本次没有 0.4.7 OTA 清单，旧版请进入“我的 → 应用更新”下载安装包。iOS 工程仍为 0.3.2。
 
 ## 使用方式
 
@@ -25,7 +25,7 @@
 
 ## 发布约定
 
-版本按[客户端版本规则](versioning.md)管理：同一官方版本上的修复只增加 Z，适配新的官方发布增加 Y 并将 Z 归零。`v0.3.1` 起不再使用 preview 后缀；仍兼容识别历史预览版本的升级顺序。
+版本按[客户端版本规则](versioning.md)管理：修复、小功能和少量兼容适配增加 Z，明显的上游功能扩展可增加 Y 并将 Z 归零。`v0.3.1` 起不再使用 preview 后缀；仍兼容识别历史预览版本的升级顺序。
 
 1. 使用同一份锁定依赖、原生配置及公开证书构建基础包和导出资源。`fingerprint.config.js` 只忽略 JS 可见的 extra 发行元数据，保留原生依赖、插件、签名、权限等变化。
 2. 导出对应平台的生产 bundle；`scripts/ota-package.mjs` 的 `prepareCandidate` 生成候选清单与内容哈希资源，不发布。清单资源地址固定为本仓库目标 Release。
@@ -59,6 +59,10 @@ node --experimental-strip-types scripts/ota-release.mjs seal \
 将候选目录中 `ota-*.hbc` 和其他哈希资源与封装后的 `ota-android-RUNTIME.json` 附到同一个 Release；不要上传验收记录、未签名候选、配置文件或私钥。iOS 按相同过程单独导出、验收，不能沿用 Android 记录。本机替代分发接口的测试证明原生链路可用，但不能当作公开 GitHub 附件下载已验收。
 
 ## 当前验证状态
+
+### 0.4.7 Android 完整包
+
+APK 内置客户端版本为 0.4.7，原生基础保持 0.4.1（versionCode 7）。正式签名、实际运行时、内置代码、默认服务为空和更新证书检查通过。本轮提供源码与完整 APK，未签发 OTA；iOS、TestFlight 与服务器部署不变。未进行真机安装、新功能界面或 OTA 下载重启验收。
 
 ### 0.4.5 Android 完整包
 

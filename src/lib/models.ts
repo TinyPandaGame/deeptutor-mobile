@@ -1,7 +1,8 @@
 import { ApiError, type TutorClient } from './client.ts';
+import { reasoningEffort, reasoningLevels, type ReasoningEffort } from './reasoning-effort.ts';
 
-export type ModelSelection = { profile_id: string; model_id: string };
-export type ModelOption = ModelSelection & { model: string; model_name: string; profile_name: string; provider: string; is_active_default: boolean; supports_vision?: boolean };
+export type ModelSelection = { profile_id: string; model_id: string; reasoning_effort?: ReasoningEffort };
+export type ModelOption = ModelSelection & { model: string; model_name: string; profile_name: string; provider: string; is_active_default: boolean; supports_vision?: boolean; declared_reasoning?: boolean; supported_reasoning_efforts?: ReasoningEffort[] };
 export type ModelOptions = { active: ModelSelection | null; options: ModelOption[] };
 export const services = { llm: '对话模型', task: '后台任务', embedding: '知识库向量', search: '联网搜索', tts: '语音朗读', stt: '语音识别', imagegen: '图片生成', videogen: '视频生成' };
 export type Service = keyof typeof services;
@@ -14,9 +15,15 @@ export type ProviderChoice = { value: string; label: string; base_url?: string; 
 export type ModelSettings = { catalog?: Catalog; providers?: Partial<Record<Service, ProviderChoice[]>>; task_kinds?: { id: string; group: string }[] };
 export type ProviderSource = { ref: Ref; provider: Provider };
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+function declaredEfforts(value: unknown): ReasoningEffort[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const valid = value.map(reasoningEffort).filter((entry): entry is ReasoningEffort => entry !== undefined);
+  return [...new Set<ReasoningEffort>(valid)];
+}
 export function selection(v: unknown): ModelSelection | null {
-  return obj(v) && typeof v.profile_id === 'string' && !!v.profile_id && typeof v.model_id === 'string' && !!v.model_id
-    ? { profile_id: v.profile_id, model_id: v.model_id } : null;
+  if (!obj(v) || typeof v.profile_id !== 'string' || !v.profile_id || typeof v.model_id !== 'string' || !v.model_id) return null;
+  const effort = reasoningEffort(v.reasoning_effort);
+  return { profile_id: v.profile_id, model_id: v.model_id, ...(effort ? { reasoning_effort: effort } : {}) };
 }
 export const selectionKey = (v: ModelSelection | null | undefined) => v ? JSON.stringify([v.profile_id, v.model_id]) : '';
 export function modelOptions(value: unknown): ModelOptions {
@@ -24,20 +31,41 @@ export function modelOptions(value: unknown): ModelOptions {
     throw Error('模型列表格式不兼容，请重新加载。');
   return { active: selection(value.active), options: value.options.map(v => ({ ...selection(v)!, model: v.model,
     model_name: String(v.model_name || v.model), profile_name: String(v.profile_name || ''), provider: String(v.provider || ''),
-    is_active_default: v.is_active_default === true, supports_vision: typeof v.supports_vision === 'boolean' ? v.supports_vision : undefined })) };
+    is_active_default: v.is_active_default === true, supports_vision: typeof v.supports_vision === 'boolean' ? v.supports_vision : undefined,
+    declared_reasoning: typeof v.declared_reasoning === 'boolean' ? v.declared_reasoning : undefined,
+    supported_reasoning_efforts: declaredEfforts(v.supported_reasoning_efforts) })) };
 }
 export async function loadModelOptions(api: TutorClient) {
   try { return modelOptions(await api.request('/api/mobile/models/options')); }
   catch (e) { if (!(e instanceof ApiError) || e.status !== 404) throw e; }
   return modelOptions(await api.request('/api/settings/llm-options'));
 }
-export function resolveTurnModel(options: ModelOptions, value: ModelSelection | null): ModelSelection {
+const reasoningChecks = new WeakMap<TutorClient, { expires: number; result: Promise<boolean> }>();
+
+/** Older turn schemas forbid the field even when the catalog lists reasoning levels. */
+export function supportsTurnReasoning(api: TutorClient): Promise<boolean> {
+  const cached = reasoningChecks.get(api);
+  if (cached && cached.expires > Date.now()) return cached.result;
+  const result = api.request<{ current_version?: string }>('/api/system/update', {}, true, 4000)
+    .then(info => ['1.7.3', '1.7.4'].includes(info?.current_version || ''))
+    .catch(() => {
+      reasoningChecks.delete(api);
+      return false;
+    });
+  reasoningChecks.set(api, { expires: Date.now() + 60_000, result });
+  return result;
+}
+
+export function resolveTurnModel(options: ModelOptions, value: ModelSelection | null, allowReasoning = false): ModelSelection {
   const chosen = value || options.active || selection(options.options[0]);
   if (!chosen) throw Error('没有可用模型，请先添加 API Key 并选择模型。');
   assertModelAvailable(options, chosen);
   // A null selection makes upstream reuse the previous session model. Resolve
   // defaults to concrete IDs on every NEW turn so switching back really works.
-  return { profile_id: chosen.profile_id, model_id: chosen.model_id };
+  const effort = value?.reasoning_effort;
+  const supported = allowReasoning ? reasoningLevels(selectedModel(options, chosen)) : [];
+  return { profile_id: chosen.profile_id, model_id: chosen.model_id,
+    ...(effort && supported.includes(effort) ? { reasoning_effort: effort } : {}) };
 }
 export function discoveryModels(result: { status?: string; models?: { id: string; services?: string[] }[] }, service: Service = 'llm') {
   if (result.status !== 'connected') throw Error(({ auth_error: 'API Key 无效或没有访问权限。', timeout: '服务商连接超时，请重试。', unavailable: '服务商不支持自动获取模型，请手动填写模型 ID。', rate_limited: '请求过于频繁，请稍后重试。' } as Record<string, string>)[result.status || ''] || '连接检测未通过，请检查 API 地址和密钥。');
